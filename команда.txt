@@ -1,0 +1,3 @@
+streamlit run app.py
+
+https://github.com/maximodessa72/spice_planning.git
