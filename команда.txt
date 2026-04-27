@@ -1,3 +1,18 @@
+https://spiceplanning.streamlit.app/
+
 streamlit run app.py
 
 https://github.com/maximodessa72/spice_planning.git
+
+bash# 
+1. Открой Git Bash в папке проекта
+# 2. Внеси изменения в файлы (например, в data.py)
+# 3. Выполни команды:
+
+git add .
+git commit -m "Описание изменений"
+git push
+
+[passwords]
+   viewer = "viewer2026"
+   admin = "admin2026"
