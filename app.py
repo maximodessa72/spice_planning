@@ -82,13 +82,33 @@ if not check_password():
 
 # ========== КОНЕЦ АУТЕНТИФИКАЦИИ ==========
 
+# Функция очистки старых подтверждённых заказов
+def cleanup_old_confirmed_orders():
+    """Удаляет подтверждённые заказы из прошлых месяцев (до текущего стартового месяца)"""
+    from data import CURRENT_START_MONTH
+    
+    for group in GROUPS:
+        # Очищаем in_transit группы
+        old_keys = [mi for mi in group.get("in_transit", {}).keys() if mi < CURRENT_START_MONTH]
+        for mi in old_keys:
+            del group["in_transit"][mi]
+        
+        # Очищаем in_transit позиций
+        for item in group["items"]:
+            old_keys = [mi for mi in item.get("in_transit", {}).keys() if mi < CURRENT_START_MONTH]
+            for mi in old_keys:
+                del item["in_transit"][mi]
+
 # Инициализация session state
 if 'groups' not in st.session_state:
+    cleanup_old_confirmed_orders()  # Очистка перед загрузкой
     st.session_state.groups = GROUPS
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'need_recalc' not in st.session_state:
     st.session_state.need_recalc = True
+if 'excel_file' not in st.session_state:
+    st.session_state.excel_file = None
 
 
 def format_number(num):
@@ -97,10 +117,18 @@ def format_number(num):
 
 
 def get_month_label(mi):
-    """Получить название месяца по индексу"""
+    """Получить название месяца по индексу с учётом текущего стартового месяца"""
+    from data import BASE_YEAR, BASE_MONTH, CURRENT_START_MONTH
+    
     months = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек']
-    y = 2026 + (3 + mi) // 12
-    m = (3 + mi) % 12
+    
+    # Добавляем сдвиг от текущего стартового месяца
+    absolute_month = CURRENT_START_MONTH + mi
+    
+    # Вычисляем год и месяц
+    y = BASE_YEAR + (BASE_MONTH - 1 + absolute_month) // 12
+    m = (BASE_MONTH - 1 + absolute_month) % 12
+    
     return f"{months[m]} {y}"
 
 
@@ -126,7 +154,7 @@ with st.sidebar:
     
     page = st.radio(
         "Выберите страницу:",
-        ["🏠 Главная", "📊 Редактор данных", "📅 Календарь заказов", "📈 Детальный просмотр"],
+        ["🏠 Главная", "📥 Импорт данных", "✅ Подтверждение заказов", "⚙️ Управление группами", "📊 Редактор данных", "📈 Аналитика", "📅 Календарь заказов", "🚚 Календарь поставок"],
         label_visibility="collapsed"
     )
     
@@ -146,13 +174,62 @@ with st.sidebar:
     
     # Кнопка экспорта
     if st.button("💾 Экспорт в Excel", use_container_width=True):
-        st.info("Экспорт будет добавлен позже")
+        try:
+            from excel_export import create_excel
+            import tempfile
+            import os
+            
+            # Проверяем что симуляция выполнена
+            if st.session_state.results is None:
+                recalculate()
+            
+            # Создаём файл во временной директории
+            with st.spinner('Создание Excel файла...'):
+                # Используем временный файл
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                    output_path = tmp.name
+                
+                create_excel(st.session_state.results, st.session_state.groups, output_path)
+                
+                # Читаем файл в память
+                with open(output_path, 'rb') as f:
+                    st.session_state.excel_file = f.read()
+                
+                # Удаляем временный файл
+                try:
+                    os.unlink(output_path)
+                except:
+                    pass
+            
+            st.success("✅ Excel файл создан!")
+        except Exception as e:
+            st.error(f"❌ Ошибка при создании файла: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+    
+    # Кнопка скачивания (отдельно, чтобы работала после перезагрузки)
+    if st.session_state.excel_file is not None:
+        st.download_button(
+            label="📥 Скачать план_балансировка.xlsx",
+            data=st.session_state.excel_file,
+            file_name="план_балансировка.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
 
 # ========== ГЛАВНАЯ СТРАНИЦА ==========
 if page == "🏠 Главная":
     st.title("📊 Система планирования закупок")
-    st.caption("18-месячный горизонт планирования контейнерных поставок")
+    
+    # Показываем текущий горизонт
+    from data import CURRENT_START_MONTH
+    start_label = get_month_label(0)
+    end_label = get_month_label(17)
+    st.caption(f"📅 Горизонт планирования: **{start_label} — {end_label}** (18 месяцев)")
+    
+    if CURRENT_START_MONTH > 0:
+        st.info(f"ℹ️ Система автоматически обновила горизонт планирования. Прошлые месяцы удалены, подтверждённые заказы из прошлого очищены.")
     
     # Пересчёт если нужно
     if st.session_state.need_recalc or st.session_state.results is None:
@@ -167,13 +244,13 @@ if page == "🏠 Главная":
         st.metric(
             "Контейнеров",
             format_number(stats["total_containers"]),
-            help="Общее количество заказов на 18 месяцев"
+            help="Общее количество заказов на 12 месяцев"
         )
     with col2:
         st.metric(
             "Общий объём",
             f"{format_number(stats['total_kg'])} кг",
-            help="Общий вес всех заказов"
+            help="Общий вес всех заказов на 12 месяцев"
         )
     with col3:
         st.metric(
@@ -200,33 +277,767 @@ if page == "🏠 Главная":
         st.dataframe(critical_df, use_container_width=True, hide_index=True)
     else:
         st.success("✅ Нет критичных групп")
+
+
+# ============================================================================
+# СТРАНИЦА: ИМПОРТ ДАННЫХ
+# ============================================================================
+elif page == "📥 Импорт данных":
+    st.title("📥 Импорт данных")
+    st.info("Обновление остатков и планов продаж")
+    
+    st.markdown("""
+    ### 📋 Процесс обновления:
+    - **Шаг 1:** Импорт остатков из учётной программы
+    - **Шаг 2:** Обновление планов продаж через Excel
+    """)
     
     st.divider()
     
-    # Ближайшие заказы
-    st.subheader("📦 Ближайшие заказы")
+    # ========================================================================
+    # ШАГ 1: ИМПОРТ ОСТАТКОВ
+    # ========================================================================
+    st.header("Шаг 1: Импорт остатков из программы")
+    st.caption("Загрузите файл с остатками из вашей учётной системы")
     
-    # Собираем заказы по месяцам
-    orders_by_month = {}
-    for group_name, group_results in results.items():
-        for r in group_results[:6]:  # Первые 6 месяцев
-            if r["containers"] > 0:
-                month = get_month_label(r["mi"])
-                if month not in orders_by_month:
-                    orders_by_month[month] = []
-                orders_by_month[month].append({
-                    "group": group_name,
-                    "containers": r["containers"],
-                    "kg": r["order_kg"]
-                })
+    uploaded_stocks = st.file_uploader(
+        "Выберите файл Excel с остатками",
+        type=['xlsx', 'xls'],
+        key='stocks_upload',
+        help="Файл должен содержать колонки с названиями позиций и остатками"
+    )
     
-    for month in sorted(orders_by_month.keys())[:3]:  # Первые 3 месяца
-        orders = orders_by_month[month]
-        total_cont = sum(o["containers"] for o in orders)
+    if uploaded_stocks is not None:
+        try:
+            # Читаем файл
+            df_raw = pd.read_excel(uploaded_stocks, header=None)
+            
+            # Ищем строку с "Остаток" и "кг"
+            data_start = None
+            for idx, row in df_raw.iterrows():
+                if pd.notna(row[2]) and 'Остаток' in str(row[2]):
+                    data_start = idx + 1
+                    break
+            
+            if data_start:
+                # Извлекаем чистые данные
+                stocks_data = []
+                for idx in range(data_start, len(df_raw)):
+                    name = df_raw.iloc[idx, 1]
+                    value = df_raw.iloc[idx, 2]
+                    
+                    if pd.notna(name) and pd.notna(value) and name != 'Итог':
+                        stocks_data.append({
+                            'Позиция': str(name).strip(),
+                            'Остаток': float(value)
+                        })
+                
+                if stocks_data:
+                    df_stocks = pd.DataFrame(stocks_data)
+                    
+                    st.success(f"✅ Файл прочитан: {len(df_stocks)} позиций")
+                    
+                    # Сопоставление с позициями проекта
+                    st.subheader("Сопоставление с позициями проекта")
+                    
+                    matches = []
+                    not_found_in_file = []
+                    not_found_in_project = []
+                    
+                    # Создаём словарь для быстрого поиска
+                    stocks_dict = {row['Позиция']: row['Остаток'] for _, row in df_stocks.iterrows()}
+                    project_positions = set()
+                    
+                    for group in st.session_state.groups:
+                        for item in group['items']:
+                            project_positions.add(item['name'])
+                            
+                            if item['name'] in stocks_dict:
+                                old_balance = item['balance']
+                                new_balance = stocks_dict[item['name']]
+                                
+                                if old_balance != new_balance:
+                                    matches.append({
+                                        'Группа': group['name'],
+                                        'Позиция': item['name'],
+                                        'Было': f"{old_balance:,.0f}",
+                                        'Станет': f"{new_balance:,.0f}",
+                                        'Изменение': f"{new_balance - old_balance:+,.0f}"
+                                    })
+                            else:
+                                not_found_in_file.append({
+                                    'Группа': group['name'],
+                                    'Позиция': item['name']
+                                })
+                    
+                    # Позиции из файла, которых нет в проекте
+                    for position in stocks_dict.keys():
+                        if position not in project_positions:
+                            not_found_in_project.append({
+                                'Позиция': position,
+                                'Остаток': f"{stocks_dict[position]:,.0f}"
+                            })
+                    
+                    # Статистика
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Найдено совпадений", len(matches))
+                    with col2:
+                        st.metric("Не найдено в файле", len(not_found_in_file))
+                    with col3:
+                        st.metric("Не найдено в проекте", len(not_found_in_project))
+                    
+                    # Показываем изменения
+                    if matches:
+                        st.subheader("Изменения остатков")
+                        matches_df = pd.DataFrame(matches)
+                        st.dataframe(matches_df, use_container_width=True, hide_index=True)
+                        
+                        # Кнопка применить
+                        st.divider()
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.warning("⚠️ Это действие обновит остатки и запустит пересчёт")
+                        with col2:
+                            if st.button("✅ Применить остатки", type="primary", use_container_width=True, key='apply_stocks'):
+                                # Применяем изменения
+                                for group in st.session_state.groups:
+                                    for item in group['items']:
+                                        if item['name'] in stocks_dict:
+                                            item['balance'] = int(stocks_dict[item['name']])
+                                
+                                # Пересчёт
+                                st.session_state.results = run_all_simulations(st.session_state.groups)
+                                st.session_state.need_recalc = False
+                                
+                                st.success("✅ Остатки обновлены и пересчитаны!")
+                                st.balloons()
+                                st.rerun()
+                    else:
+                        st.info("ℹ️ Изменений остатков не обнаружено")
+                    
+                    # Предупреждения
+                    if not_found_in_file:
+                        with st.expander(f"⚠️ Не найдено в файле ({len(not_found_in_file)} позиций)"):
+                            st.dataframe(pd.DataFrame(not_found_in_file), use_container_width=True, hide_index=True)
+                    
+                    if not_found_in_project:
+                        with st.expander(f"⚠️ Не найдено в проекте ({len(not_found_in_project)} позиций)"):
+                            st.dataframe(pd.DataFrame(not_found_in_project), use_container_width=True, hide_index=True)
+                
+                else:
+                    st.error("❌ Не удалось извлечь данные из файла")
+            else:
+                st.error("❌ Не найдена строка с заголовком 'Остаток'. Проверьте формат файла.")
         
-        with st.expander(f"**{month}**: {total_cont} контейнеров"):
-            for order in orders:
-                st.write(f"• {order['group']}: {order['containers']} конт. ({format_number(order['kg'])} кг)")
+        except Exception as e:
+            st.error(f"❌ Ошибка при чтении файла: {e}")
+    
+    st.divider()
+    
+    # ========================================================================
+    # ШАГ 2: ОБНОВЛЕНИЕ ПЛАНОВ
+    # ========================================================================
+    st.header("Шаг 2: Обновление планов продаж")
+    st.caption("Скачайте шаблон, обновите планы в Excel, загрузите обратно")
+    
+    # Кнопка скачать шаблон
+    if st.button("📥 Скачать шаблон для планов", type="primary"):
+        import io
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        
+        # Создаём Excel
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Обновление планов"
+        
+        # Заголовки
+        headers = ["Группа", "Позиция", "План (текущий)", "План (новый)", "Сезонная"]
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col)
+            cell.value = header
+            cell.font = Font(bold=True, size=11, color='FFFFFF')
+            cell.fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # Ширина колонок
+        ws.column_dimensions['A'].width = 30
+        ws.column_dimensions['B'].width = 30
+        ws.column_dimensions['C'].width = 18
+        ws.column_dimensions['D'].width = 18
+        ws.column_dimensions['E'].width = 12
+        
+        # Данные
+        row = 2
+        for group in st.session_state.groups:
+            for item in group["items"]:
+                ws.cell(row=row, column=1, value=group["name"])
+                ws.cell(row=row, column=2, value=item["name"])
+                ws.cell(row=row, column=3, value=item["plan"])
+                ws.cell(row=row, column=4, value=item["plan"])  # Заполнено текущим
+                ws.cell(row=row, column=5, value="Да" if item.get("seasonal") else "Нет")
+                
+                # Если сезонная - выделяем жёлтым и защищаем
+                if item.get("seasonal"):
+                    for col in range(1, 6):
+                        ws.cell(row=row, column=col).fill = PatternFill(
+                            start_color='FFF9C4', end_color='FFF9C4', fill_type='solid'
+                        )
+                
+                row += 1
+        
+        # Сохраняем в буфер
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        
+        st.download_button(
+            label="💾 Скачать шаблон планов",
+            data=buffer,
+            file_name=f"обновление_планов_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        
+        st.success("✅ Шаблон готов к скачиванию!")
+        st.info("💡 **Инструкция:** Обновите колонку 'План (новый)'. Для сезонных позиций (жёлтые) план НЕ обновляется.")
+    
+    st.divider()
+    
+    # Загрузка планов
+    st.subheader("Загрузить обновлённые планы")
+    
+    uploaded_plans = st.file_uploader(
+        "Выберите файл Excel с обновлёнными планами",
+        type=['xlsx'],
+        key='plans_upload',
+        help="Загрузите файл, который вы скачали и обновили выше"
+    )
+    
+    if uploaded_plans is not None:
+        try:
+            # Читаем файл
+            df_plans = pd.read_excel(uploaded_plans)
+            
+            # Валидация
+            required_cols = ["Группа", "Позиция", "План (новый)"]
+            if not all(col in df_plans.columns for col in required_cols):
+                st.error("❌ Неправильный формат файла! Используйте шаблон выше.")
+            else:
+                st.success(f"✅ Файл загружен: {len(df_plans)} позиций")
+                
+                # Собираем изменения
+                plan_changes = []
+                for idx, row in df_plans.iterrows():
+                    old_plan = row.get("План (текущий)", 0)
+                    new_plan = row.get("План (новый)", 0)
+                    is_seasonal = row.get("Сезонная", "Нет") == "Да"
+                    
+                    if not is_seasonal and old_plan != new_plan:
+                        plan_changes.append({
+                            "Группа": row["Группа"],
+                            "Позиция": row["Позиция"],
+                            "Было": f"{old_plan:,.0f}",
+                            "Станет": f"{new_plan:,.0f}",
+                            "Изменение": f"{new_plan - old_plan:+,.0f}"
+                        })
+                
+                if plan_changes:
+                    st.subheader("Изменения планов")
+                    st.write(f"**Найдено изменений:** {len(plan_changes)}")
+                    changes_df = pd.DataFrame(plan_changes)
+                    st.dataframe(changes_df, use_container_width=True, hide_index=True)
+                    
+                    # Применить
+                    st.divider()
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.warning("⚠️ Это действие обновит планы и запустит пересчёт")
+                    with col2:
+                        if st.button("✅ Применить планы", type="primary", use_container_width=True, key='apply_plans'):
+                            # Применяем изменения
+                            for idx, row in df_plans.iterrows():
+                                group_name = row["Группа"]
+                                item_name = row["Позиция"]
+                                new_plan = row.get("План (новый)", 0)
+                                is_seasonal = row.get("Сезонная", "Нет") == "Да"
+                                
+                                # Находим позицию
+                                for group in st.session_state.groups:
+                                    if group["name"] == group_name:
+                                        for item in group["items"]:
+                                            if item["name"] == item_name and not is_seasonal:
+                                                item["plan"] = int(new_plan)
+                                                break
+                            
+                            # Пересчёт
+                            st.session_state.results = run_all_simulations(st.session_state.groups)
+                            st.session_state.need_recalc = False
+                            
+                            st.success("✅ Планы обновлены и пересчитаны!")
+                            st.balloons()
+                            st.rerun()
+                else:
+                    st.info("ℹ️ Изменений планов не обнаружено")
+        
+        except Exception as e:
+            st.error(f"❌ Ошибка при чтении файла: {e}")
+
+
+
+# ============================================================================
+# СТРАНИЦА: ПОДТВЕРЖДЕНИЕ ЗАКАЗОВ
+# ============================================================================
+elif page == "✅ Подтверждение заказов":
+    st.title("✅ Подтверждение заказов")
+    st.info("Внесение точной комплектации подтверждённой производителем")
+    
+    # Пересчёт если нужно
+    if st.session_state.need_recalc or st.session_state.results is None:
+        with st.spinner('Пересчёт...'):
+            st.session_state.results = run_all_simulations(st.session_state.groups)
+            st.session_state.need_recalc = False
+    
+    results = st.session_state.results
+    
+    # Вкладки
+    tab1, tab2 = st.tabs(["📝 Новое подтверждение", "📋 Подтверждённые заказы"])
+    
+    # ========================================================================
+    # ВКЛАДКА 1: НОВОЕ ПОДТВЕРЖДЕНИЕ
+    # ========================================================================
+    with tab1:
+        st.subheader("Шаг 1: Выбор группы")
+        
+        # Группируем заказы по группам
+        orders_by_group = {}
+        
+        for group in st.session_state.groups:
+            group_results = results[group["name"]]
+            group_orders = []
+            
+            for mi in range(12):
+                r = group_results[mi]
+                
+                if r["containers"] > 0:
+                    arrival_mi = mi + (group["cycle"] // 30)
+                    is_fixed = arrival_mi < len(group_results) and group_results[arrival_mi]["in_transit"]
+                    
+                    if not is_fixed:
+                        group_orders.append({
+                            "Месяц заказа": get_month_label(mi),
+                            "Месяц прихода": get_month_label(arrival_mi),
+                            "Контейнеров": r["containers"],
+                            "Вес (кг)": r["order_kg"],
+                            "Срочность": "🔴 Очень срочно" if r["w_buf_before"] < 0.5 else "🟠 Срочно" if r["w_buf_before"] < 0.75 else "🟡 Есть время",
+                            "_group": group,
+                            "_arrival_mi": arrival_mi,
+                            "_order_mi": mi
+                        })
+            
+            if group_orders:
+                orders_by_group[group["name"]] = group_orders
+        
+        if orders_by_group:
+            # Выбор группы
+            group_names_with_orders = list(orders_by_group.keys())
+            selected_group_name = st.selectbox(
+                "Выберите группу:",
+                group_names_with_orders,
+                key="confirm_group_select"
+            )
+            
+            st.divider()
+            st.subheader("Шаг 2: Выбор заказа")
+            
+            # Показываем заказы выбранной группы
+            group_orders = orders_by_group[selected_group_name]
+            
+            st.write(f"**Неподтверждённых заказов в группе:** {len(group_orders)}")
+            
+            # Таблица заказов
+            orders_df = pd.DataFrame([{
+                "Месяц заказа": o["Месяц заказа"],
+                "Месяц прихода": o["Месяц прихода"],
+                "Контейнеров": o["Контейнеров"],
+                "Вес (кг)": f"{o['Вес (кг)']:,}",
+                "Срочность": o["Срочность"]
+            } for o in group_orders])
+            
+            st.dataframe(orders_df, use_container_width=True, hide_index=True)
+            
+            # Выбор заказа
+            order_options = [
+                f"{o['Месяц заказа']} → {o['Месяц прихода']} ({o['Вес (кг)']:,} кг, {o['Контейнеров']} конт.)"
+                for o in group_orders
+            ]
+            
+            selected_order_idx = st.selectbox(
+                "Выберите заказ для подтверждения:",
+                range(len(order_options)),
+                format_func=lambda x: order_options[x],
+                key="confirm_order_select"
+            )
+            
+            selected_order = group_orders[selected_order_idx]
+            group = selected_order["_group"]
+            arrival_mi = selected_order["_arrival_mi"]
+            
+            st.divider()
+            st.subheader("Шаг 3: Внесение согласованной комплектации")
+            
+            st.write(f"**Группа:** {group['name']}")
+            st.write(f"**Заказ:** {selected_order['Месяц заказа']} → Приход: {selected_order['Месяц прихода']}")
+            
+            # Общий вес
+            total_weight = st.number_input(
+                "Общий вес контейнера от производителя (кг):",
+                min_value=0,
+                value=selected_order["Вес (кг)"],
+                step=100,
+                key=f"total_weight_{selected_group_name}_{selected_order_idx}"
+            )
+            
+            st.divider()
+            
+            # Таблица комплектации
+            st.write("**Комплектация от производителя (кг):**")
+            
+            # Инициализация данных
+            fix_key = f'fix_data_{selected_group_name}_{selected_order_idx}'
+            if fix_key not in st.session_state:
+                st.session_state[fix_key] = {}
+                for item in group["items"]:
+                    st.session_state[fix_key][item["name"]] = 0
+            
+            fix_data = st.session_state[fix_key]
+            
+            # Таблица для ввода
+            for item in group["items"]:
+                cols = st.columns([3, 2])
+                with cols[0]:
+                    st.write(item["name"])
+                with cols[1]:
+                    fix_data[item["name"]] = st.number_input(
+                        "Вес (кг)",
+                        min_value=0,
+                        value=int(fix_data[item["name"]]),
+                        step=25,
+                        key=f"item_{selected_group_name}_{selected_order_idx}_{item['name']}",
+                        label_visibility="collapsed"
+                    )
+            
+            # Кнопка подтверждения
+            st.divider()
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.warning("⚠️ После подтверждения заказ будет помечен как 'Уже заказан'")
+            with col2:
+                if st.button("✅ Подтвердить заказ", type="primary", use_container_width=True):
+                    # Фиксируем в данных
+                    group["in_transit"][arrival_mi] = total_weight
+                    
+                    for item in group["items"]:
+                        if fix_data[item["name"]] > 0:
+                            item["in_transit"][arrival_mi] = fix_data[item["name"]]
+                        else:
+                            item["in_transit"][arrival_mi] = 0
+                    
+                    # Пересчёт
+                    st.session_state.results = run_all_simulations(st.session_state.groups)
+                    st.session_state.need_recalc = False
+                    
+                    # Очищаем временные данные
+                    if fix_key in st.session_state:
+                        del st.session_state[fix_key]
+                    
+                    st.success("✅ Заказ подтверждён!")
+                    st.balloons()
+                    st.rerun()
+        
+        else:
+            st.info("ℹ️ Нет неподтверждённых заказов")
+    
+    # ========================================================================
+    # ВКЛАДКА 2: ПОДТВЕРЖДЁННЫЕ ЗАКАЗЫ
+    # ========================================================================
+    with tab2:
+        st.subheader("Подтверждённые заказы")
+        
+        # Собираем все подтверждённые заказы
+        fixed_orders = []
+        
+        for group in st.session_state.groups:
+            for mi, weight in group.get("in_transit", {}).items():
+                if weight > 0:
+                    # Собираем комплектацию
+                    composition = []
+                    for item in group["items"]:
+                        item_weight = item.get("in_transit", {}).get(mi, 0)
+                        if item_weight > 0:
+                            composition.append(f"{item['name']}: {item_weight:,} кг")
+                    
+                    fixed_orders.append({
+                        "Группа": group["name"],
+                        "Месяц прихода": get_month_label(mi),
+                        "Вес (кг)": f"{weight:,}",
+                        "Позиций": len(composition),
+                        "Комплектация": "\n".join(composition),
+                        "_group": group,
+                        "_mi": mi
+                    })
+        
+        if fixed_orders:
+            st.write(f"**Всего подтверждённых заказов:** {len(fixed_orders)}")
+            
+            # Показываем список
+            for idx, order in enumerate(fixed_orders):
+                with st.expander(f"**{order['Группа']}** → {order['Месяц прихода']} ({order['Вес (кг)']} кг)"):
+                    st.write("**Комплектация:**")
+                    st.text(order["Комплектация"])
+                    
+                    # Три колонки для кнопок
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        # Кнопка скачать спецификацию
+                        if st.button("📥 Скачать спецификацию", key=f"download_{idx}"):
+                            import io
+                            import openpyxl
+                            from openpyxl.styles import Font, PatternFill, Alignment
+                            
+                            wb = openpyxl.Workbook()
+                            ws = wb.active
+                            ws.title = "Спецификация заказа"
+                            
+                            # Заголовок
+                            ws.merge_cells('A1:C1')
+                            ws['A1'] = f"Спецификация заказа: {order['Группа']}"
+                            ws['A1'].font = Font(bold=True, size=14)
+                            ws['A1'].alignment = Alignment(horizontal='center')
+                            
+                            ws['A2'] = f"Месяц прихода: {order['Месяц прихода']}"
+                            ws['A3'] = f"Общий вес: {order['Вес (кг)']} кг"
+                            
+                            # Таблица
+                            ws['A5'] = "Позиция"
+                            ws['B5'] = "Вес (кг)"
+                            ws['A5'].font = Font(bold=True)
+                            ws['B5'].font = Font(bold=True)
+                            
+                            row = 6
+                            for item in order["_group"]["items"]:
+                                item_weight = item.get("in_transit", {}).get(order["_mi"], 0)
+                                if item_weight > 0:
+                                    ws.cell(row=row, column=1, value=item["name"])
+                                    ws.cell(row=row, column=2, value=item_weight)
+                                    row += 1
+                            
+                            ws.column_dimensions['A'].width = 50
+                            ws.column_dimensions['B'].width = 15
+                            
+                            buffer = io.BytesIO()
+                            wb.save(buffer)
+                            buffer.seek(0)
+                            
+                            st.download_button(
+                                label="💾 Скачать Excel",
+                                data=buffer,
+                                file_name=f"Спецификация_{order['Группа']}_{order['Месяц прихода']}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"download_btn_{idx}"
+                            )
+                    
+                    with col2:
+                        # Кнопки смещения заказа
+                        st.caption("Сместить заказ:")
+                        
+                        # Проверяем можно ли сместить назад
+                        from data import CURRENT_START_MONTH
+                        can_move_back = order["_mi"] > CURRENT_START_MONTH
+                        
+                        # Кнопка сместить назад
+                        if st.button("⬅️ На месяц назад", 
+                                    key=f"move_back_{idx}", 
+                                    disabled=not can_move_back,
+                                    use_container_width=True,
+                                    help="Переместить на предыдущий месяц" if can_move_back else "Нельзя переместить в прошлое"):
+                            # Смещаем на месяц назад
+                            old_mi = order["_mi"]
+                            new_mi = old_mi - 1
+                            
+                            # Переносим данные группы
+                            order["_group"]["in_transit"][new_mi] = order["_group"]["in_transit"].pop(old_mi)
+                            
+                            # Переносим данные позиций
+                            for item in order["_group"]["items"]:
+                                if old_mi in item.get("in_transit", {}):
+                                    item["in_transit"][new_mi] = item["in_transit"].pop(old_mi)
+                            
+                            # Пересчёт
+                            st.session_state.results = run_all_simulations(st.session_state.groups)
+                            st.session_state.need_recalc = False
+                            
+                            st.success(f"✅ Заказ перемещён: {order['Месяц прихода']} → {get_month_label(new_mi)}")
+                            st.rerun()
+                        
+                        # Кнопка сместить вперёд
+                        if st.button("➡️ На месяц вперёд", 
+                                    key=f"move_forward_{idx}",
+                                    use_container_width=True,
+                                    help="Переместить на следующий месяц"):
+                            # Смещаем на месяц вперёд
+                            old_mi = order["_mi"]
+                            new_mi = old_mi + 1
+                            
+                            # Переносим данные группы
+                            order["_group"]["in_transit"][new_mi] = order["_group"]["in_transit"].pop(old_mi)
+                            
+                            # Переносим данные позиций
+                            for item in order["_group"]["items"]:
+                                if old_mi in item.get("in_transit", {}):
+                                    item["in_transit"][new_mi] = item["in_transit"].pop(old_mi)
+                            
+                            # Пересчёт
+                            st.session_state.results = run_all_simulations(st.session_state.groups)
+                            st.session_state.need_recalc = False
+                            
+                            st.success(f"✅ Заказ перемещён: {order['Месяц прихода']} → {get_month_label(new_mi)}")
+                            st.rerun()
+                    
+                    with col3:
+                        # Кнопка отменить подтверждение
+                        st.caption(" ")  # Выравнивание
+                        if st.button("🗑️ Отменить подтверждение", key=f"unfix_{idx}", type="secondary", use_container_width=True):
+                            # Удаляем подтверждение
+                            if order["_mi"] in order["_group"]["in_transit"]:
+                                del order["_group"]["in_transit"][order["_mi"]]
+                            
+                            for item in order["_group"]["items"]:
+                                if order["_mi"] in item.get("in_transit", {}):
+                                    del item["in_transit"][order["_mi"]]
+                            
+                            # Пересчёт
+                            st.session_state.results = run_all_simulations(st.session_state.groups)
+                            st.session_state.need_recalc = False
+                            
+                            st.success("✅ Подтверждение отменено!")
+                            st.rerun()
+        else:
+            st.info("ℹ️ Нет подтверждённых заказов")
+
+
+
+# ============================================================================
+# СТРАНИЦА: УПРАВЛЕНИЕ ГРУППАМИ
+# ============================================================================
+elif page == "⚙️ Управление группами":
+    st.title("⚙️ Управление группами")
+    st.info("Активация и деактивация товарных групп")
+    
+    st.markdown("""
+    **Деактивированные группы:**
+    - Не участвуют в планировании заказов
+    - Не показываются в календарях
+    - Остатки и планы сохраняются
+    - Можно активировать в любой момент
+    """)
+    
+    st.divider()
+    
+    # Разделяем на активные и неактивные
+    active_groups = [g for g in st.session_state.groups if g.get("active", True)]
+    inactive_groups = [g for g in st.session_state.groups if not g.get("active", True)]
+    
+    # Показываем статистику
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Активных групп", len(active_groups))
+    with col2:
+        st.metric("Деактивированных групп", len(inactive_groups))
+    
+    st.divider()
+    
+    # Две колонки: активные и неактивные
+    col_active, col_inactive = st.columns(2)
+    
+    # ========================================================================
+    # АКТИВНЫЕ ГРУППЫ
+    # ========================================================================
+    with col_active:
+        st.subheader("✅ Активные группы")
+        
+        if active_groups:
+            for group in active_groups:
+                with st.expander(f"**{group['name']}**"):
+                    st.write(f"**Позиций:** {len(group['items'])}")
+                    st.write(f"**Цикл поставки:** {group['cycle']} дней")
+                    st.write(f"**Размер контейнера:** {format_number(group['container'])} кг")
+                    
+                    # Показываем позиции
+                    st.caption("Позиции:")
+                    for item in group['items'][:5]:  # Первые 5
+                        st.text(f"  • {item['name']}")
+                    if len(group['items']) > 5:
+                        st.caption(f"  ... и ещё {len(group['items']) - 5}")
+                    
+                    st.divider()
+                    
+                    # Кнопка деактивации
+                    if st.button(
+                        "🔴 Деактивировать группу", 
+                        key=f"deactivate_{group['name']}",
+                        type="secondary",
+                        use_container_width=True
+                    ):
+                        group["active"] = False
+                        st.session_state.need_recalc = True
+                        st.success(f"✅ Группа '{group['name']}' деактивирована")
+                        st.rerun()
+        else:
+            st.info("Все группы деактивированы")
+    
+    # ========================================================================
+    # НЕАКТИВНЫЕ ГРУППЫ
+    # ========================================================================
+    with col_inactive:
+        st.subheader("⏸️ Деактивированные группы")
+        
+        if inactive_groups:
+            for group in inactive_groups:
+                with st.expander(f"**{group['name']}** (неактивна)"):
+                    st.write(f"**Позиций:** {len(group['items'])}")
+                    st.write(f"**Цикл поставки:** {group['cycle']} дней")
+                    st.write(f"**Размер контейнера:** {format_number(group['container'])} кг")
+                    
+                    # Показываем позиции
+                    st.caption("Позиции:")
+                    for item in group['items'][:5]:
+                        st.text(f"  • {item['name']}")
+                    if len(group['items']) > 5:
+                        st.caption(f"  ... и ещё {len(group['items']) - 5}")
+                    
+                    st.divider()
+                    
+                    # Кнопка активации
+                    if st.button(
+                        "✅ Активировать группу", 
+                        key=f"activate_{group['name']}",
+                        type="primary",
+                        use_container_width=True
+                    ):
+                        group["active"] = True
+                        st.session_state.need_recalc = True
+                        st.success(f"✅ Группа '{group['name']}' активирована")
+                        st.rerun()
+        else:
+            st.info("Нет деактивированных групп")
+    
+    # Предупреждение
+    if st.session_state.need_recalc:
+        st.divider()
+        st.warning("⚠️ Есть несохранённые изменения. Нажмите 'Пересчитать' в боковом меню для применения.")
 
 
 # ========== РЕДАКТОР ДАННЫХ ==========
@@ -250,12 +1061,39 @@ elif page == "📊 Редактор данных":
     
     st.divider()
     
-    # Информация о группе
+    # Параметры группы (редактируемые)
+    st.subheader("Параметры группы")
+    
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Цикл поставки", f"{group['cycle']} дней")
+        new_cycle = st.number_input(
+            "Цикл поставки (дней)",
+            min_value=1,
+            max_value=365,
+            value=group['cycle'],
+            step=1,
+            key=f"cycle_{group_idx}",
+            help="Время от размещения заказа до прихода контейнера"
+        )
+        if new_cycle != group['cycle']:
+            group['cycle'] = new_cycle
+            st.session_state.need_recalc = True
+            st.success(f"✅ Цикл обновлён: {new_cycle} дней")
+    
     with col2:
-        st.metric("Размер контейнера", f"{format_number(group['container'])} кг")
+        new_container = st.number_input(
+            "Размер контейнера (кг)",
+            min_value=1000,
+            max_value=100000,
+            value=group['container'],
+            step=1000,
+            key=f"container_{group_idx}",
+            help="Вместимость одного контейнера в килограммах"
+        )
+        if new_container != group['container']:
+            group['container'] = new_container
+            st.session_state.need_recalc = True
+            st.success(f"✅ Размер контейнера обновлён: {format_number(new_container)} кг")
     
     st.divider()
     
@@ -305,46 +1143,18 @@ elif page == "📊 Редактор данных":
                 # TODO: Добавить возможность редактировать фиксированные приходы
 
 
-# ========== КАЛЕНДАРЬ ЗАКАЗОВ ==========
-elif page == "📅 Календарь заказов":
-    st.title("📅 Календарь заказов")
-    st.caption("Визуализация помесячных заказов по всем группам")
-    
-    # Пересчёт если нужно
-    if st.session_state.need_recalc or st.session_state.results is None:
-        recalculate()
-    
-    results = st.session_state.results
-    
-    # Создаём таблицу: группы × месяцы
-    calendar_data = []
-    
-    for group in st.session_state.groups:
-        row = {"Группа": group["name"]}
-        group_results = results[group["name"]]
-        
-        for mi in range(N_MONTHS):
-            month = get_month_label(mi)
-            containers = group_results[mi]["containers"]
-            row[month] = containers if containers > 0 else ""
-        
-        calendar_data.append(row)
-    
-    df = pd.DataFrame(calendar_data)
-    
-    # Отображаем таблицу
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        height=800
-    )
 
 
 # ========== ДЕТАЛЬНЫЙ ПРОСМОТР ==========
-elif page == "📈 Детальный просмотр":
-    st.title("📈 Детальный просмотр")
-    st.caption("Подробная информация по выбранной группе")
+
+
+
+# ============================================================================
+# СТРАНИЦА: АНАЛИТИКА
+# ============================================================================
+elif page == "📈 Аналитика":
+    st.title("📈 Аналитика закупок")
+    st.caption("Визуализация структуры и динамики заказов")
     
     # Пересчёт если нужно
     if st.session_state.need_recalc or st.session_state.results is None:
@@ -352,75 +1162,552 @@ elif page == "📈 Детальный просмотр":
     
     results = st.session_state.results
     
-    # Выбор группы
-    group_names = [g["name"] for g in st.session_state.groups]
-    selected_group_name = st.selectbox("Выберите группу:", group_names)
-    
-    # Находим группу и результаты
-    group_idx = group_names.index(selected_group_name)
-    group = st.session_state.groups[group_idx]
-    group_results = results[selected_group_name]
+    # Фильтр: показывать ли неактивные группы
+    show_inactive = st.checkbox("Показывать неактивные группы", value=False)
     
     st.divider()
     
-    # Таблица по месяцам
-    table_data = []
+    # ========================================================================
+    # БЛОК 1: СТРУКТУРА ПОСТАВОК
+    # ========================================================================
+    st.subheader("📊 Структура поставок (12 месяцев)")
     
-    for r in group_results[:12]:  # Первые 12 месяцев
-        month = get_month_label(r["mi"])
+    # Собираем данные по группам
+    group_stats = []
+    
+    for group in st.session_state.groups:
+        is_active = group.get("active", True)
         
-        # Суммарный остаток на начало
-        total_balance = sum(r["bsi"].values())
+        # Пропускаем неактивные если фильтр выключен
+        if not is_active and not show_inactive:
+            continue
         
-        # Приход
-        arrive_str = format_number(r["arrive"]) if r["arrive"] > 0 else "—"
+        group_results = results[group["name"]]
+        total_containers = sum(r["containers"] for r in group_results[:12])
+        total_kg = sum(r["order_kg"] for r in group_results[:12])
         
-        # Буфер
-        buffer_str = f"{r['w_buf_after']:.2f}"
+        if total_kg > 0:  # Только если есть заказы
+            group_stats.append({
+                "Группа": group["name"],
+                "Контейнеры": total_containers,
+                "Вес (кг)": total_kg,
+                "Активна": is_active
+            })
+    
+    if group_stats:
+        # Сортируем по весу
+        group_stats.sort(key=lambda x: x["Вес (кг)"], reverse=True)
         
-        # Заказ
-        order_str = f"{r['containers']} конт." if r["containers"] > 0 else "—"
+        col1, col2 = st.columns(2)
         
-        table_data.append({
-            "Месяц": month,
-            "Остаток (кг)": format_number(int(total_balance)),
-            "Приход (кг)": arrive_str,
-            "Буфер (мес)": buffer_str,
-            "Заказ": order_str
+        with col1:
+            # График 1: Круговая диаграмма по весу (топ-10)
+            import plotly.graph_objects as go
+            
+            top10 = group_stats[:10]
+            others_weight = sum(g["Вес (кг)"] for g in group_stats[10:])
+            
+            labels = [g["Группа"] for g in top10]
+            values = [g["Вес (кг)"] for g in top10]
+            
+            if others_weight > 0:
+                labels.append("Остальные")
+                values.append(others_weight)
+            
+            fig = go.Figure(data=[go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.3,
+                textinfo='label+percent',
+                textposition='auto',
+                textfont=dict(size=14),  # Увеличенный шрифт на графике
+                hovertemplate='<b>%{label}</b><br>Вес: %{value:,.0f} кг<br>Доля: %{percent}<extra></extra>'
+            )])
+            
+            fig.update_layout(
+                title=dict(text="Доля групп по весу", font=dict(size=18, family="Arial")),
+                showlegend=False,
+                height=400,
+                font=dict(size=14, family="Arial")
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # График 2: Топ-10 групп по контейнерам
+            import plotly.express as px
+            
+            top10_df = pd.DataFrame(top10)
+            
+            fig = px.bar(
+                top10_df,
+                x="Контейнеры",
+                y="Группа",
+                orientation='h',
+                title="Топ-10 групп по контейнерам",
+                labels={"Контейнеры": "Контейнеры", "Группа": ""},
+                color="Контейнеры",
+                color_continuous_scale="Blues"
+            )
+            
+            fig.update_layout(
+                showlegend=False,
+                height=400,
+                xaxis_title="Количество контейнеров",
+                yaxis_title="",
+                title=dict(font=dict(size=18, family="Arial")),
+                font=dict(size=14, family="Arial"),
+                xaxis=dict(title_font=dict(size=16)),
+                yaxis=dict(categoryorder='total ascending', tickfont=dict(size=14))
+            )
+            
+            fig.update_traces(
+                hovertemplate='<b>%{y}</b><br>Контейнеры: %{x}<extra></extra>'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Нет данных для отображения")
+    
+    st.divider()
+    
+    # ========================================================================
+    # БЛОК 2: ДИНАМИКА ЗАКАЗОВ
+    # ========================================================================
+    st.subheader("📈 Динамика заказов по месяцам")
+    
+    # Собираем данные по месяцам
+    monthly_data = []
+    
+    for mi in range(12):
+        month_label = get_month_label(mi)
+        total_containers = 0
+        total_kg = 0
+        
+        for group in st.session_state.groups:
+            is_active = group.get("active", True)
+            
+            if not is_active and not show_inactive:
+                continue
+            
+            group_results = results[group["name"]]
+            if mi < len(group_results):
+                r = group_results[mi]
+                total_containers += r["containers"]
+                total_kg += r["order_kg"]
+        
+        monthly_data.append({
+            "Месяц": month_label,
+            "Контейнеры": total_containers,
+            "Вес (тонны)": total_kg / 1000
         })
     
-    df = pd.DataFrame(table_data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    monthly_df = pd.DataFrame(monthly_data)
     
-    st.divider()
+    # Линейный график с двумя осями
+    fig = go.Figure()
     
-    # Детали по позициям
-    st.subheader("Детали по позициям")
+    # Линия контейнеров
+    fig.add_trace(go.Scatter(
+        x=monthly_df["Месяц"],
+        y=monthly_df["Контейнеры"],
+        name="Контейнеры",
+        line=dict(color='#1f77b4', width=3),
+        mode='lines+markers',
+        hovertemplate='<b>%{x}</b><br>Контейнеры: %{y}<extra></extra>'
+    ))
     
-    selected_month = st.selectbox(
-        "Выберите месяц:",
-        [get_month_label(i) for i in range(12)]
+    # Линия веса (вторая ось)
+    fig.add_trace(go.Scatter(
+        x=monthly_df["Месяц"],
+        y=monthly_df["Вес (тонны)"],
+        name="Вес (тонны)",
+        line=dict(color='#ff7f0e', width=3),
+        mode='lines+markers',
+        yaxis="y2",
+        hovertemplate='<b>%{x}</b><br>Вес: %{y:.1f} т<extra></extra>'
+    ))
+    
+    fig.update_layout(
+        title=dict(text="Контейнеры и вес заказов по месяцам", font=dict(size=18, family="Arial")),
+        xaxis_title="Месяц",
+        yaxis_title="Контейнеры",
+        yaxis2=dict(
+            title="Вес (тонны)",
+            overlaying="y",
+            side="right",
+            title_font=dict(size=16)
+        ),
+        hovermode="x unified",
+        height=400,
+        font=dict(size=14, family="Arial"),
+        xaxis=dict(
+            title_font=dict(size=16),
+            tickfont=dict(size=14)
+        ),
+        yaxis=dict(
+            title_font=dict(size=16),
+            tickfont=dict(size=14)
+        ),
+        legend=dict(font=dict(size=14))
     )
     
-    # Находим индекс месяца
-    mi = [get_month_label(i) for i in range(12)].index(selected_month)
-    r = group_results[mi]
+    st.plotly_chart(fig, use_container_width=True)
     
-    # Создаём таблицу по позициям
-    items_data = []
-    for item in group["items"]:
-        items_data.append({
-            "Позиция": item["name"],
-            "Остаток начало": format_number(int(r["bsi"][item["name"]])),
-            "Приход": format_number(int(r["ia"][item["name"]])) if r["ia"][item["name"]] > 0 else "—",
-            "План": format_number(get_plan(item, mi)),
-            "Буфер после": f"{r['ica'][item['name']]:.2f}"
+    st.divider()
+    
+    # ========================================================================
+    # БЛОК 3: БУФЕРЫ И РИСКИ
+    # ========================================================================
+    st.subheader("⚠️ Буферы и риски")
+    
+    # Собираем минимальные буферы по группам
+    buffer_stats = []
+    
+    for group in st.session_state.groups:
+        is_active = group.get("active", True)
+        
+        if not is_active and not show_inactive:
+            continue
+        
+        group_results = results[group["name"]]
+        
+        # Ищем минимальный буфер за 12 месяцев
+        min_buffer = 99
+        min_month = ""
+        
+        for r in group_results[:12]:
+            if r["w_buf_after"] < min_buffer:
+                min_buffer = r["w_buf_after"]
+                min_month = get_month_label(r["mi"])
+        
+        buffer_stats.append({
+            "Группа": group["name"],
+            "Мин. буфер": min_buffer,
+            "Месяц": min_month,
+            "Уровень": "Критично" if min_buffer < 1.0 else "Нормально" if min_buffer < 2.0 else "Хорошо"
         })
     
-    items_df = pd.DataFrame(items_data)
-    st.dataframe(items_df, use_container_width=True, hide_index=True)
+    if buffer_stats:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # График: Распределение по уровням буфера
+            level_counts = {
+                "Критично (< 1 мес)": sum(1 for b in buffer_stats if b["Мин. буфер"] < 1.0),
+                "Нормально (1-2 мес)": sum(1 for b in buffer_stats if 1.0 <= b["Мин. буфер"] < 2.0),
+                "Хорошо (≥ 2 мес)": sum(1 for b in buffer_stats if b["Мин. буфер"] >= 2.0)
+            }
+            
+            fig = go.Figure(data=[go.Pie(
+                labels=list(level_counts.keys()),
+                values=list(level_counts.values()),
+                marker=dict(colors=['#ff4444', '#ffaa44', '#44aa44']),
+                textinfo='label+value',
+                textfont=dict(size=14),
+                hovertemplate='<b>%{label}</b><br>Групп: %{value}<br>Доля: %{percent}<extra></extra>'
+            )])
+            
+            fig.update_layout(
+                title=dict(text="Распределение групп по уровню буфера", font=dict(size=18, family="Arial")),
+                showlegend=False,
+                height=400,
+                font=dict(size=14, family="Arial")
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            # Таблица: Топ-5 критичных групп
+            st.write("**Топ-5 самых критичных групп:**")
+            
+            critical = sorted(buffer_stats, key=lambda x: x["Мин. буфер"])[:5]
+            critical_df = pd.DataFrame([{
+                "Группа": c["Группа"],
+                "Мин. буфер (мес)": f"{c['Мин. буфер']:.2f}",
+                "Месяц": c["Месяц"]
+            } for c in critical])
+            
+            st.dataframe(critical_df, use_container_width=True, hide_index=True, height=350)
+    
+    st.divider()
+    
+    # ========================================================================
+    # БЛОК 4: СТАТИСТИКА ЦИКЛОВ
+    # ========================================================================
+    st.subheader("⏱️ Распределение по циклам поставки")
+    
+    # Собираем данные по циклам
+    cycle_groups = {
+        "14-60 дней": [],
+        "60-90 дней": [],
+        "90+ дней": []
+    }
+    
+    for group in st.session_state.groups:
+        is_active = group.get("active", True)
+        
+        if not is_active and not show_inactive:
+            continue
+        
+        cycle = group["cycle"]
+        
+        if cycle <= 60:
+            cycle_groups["14-60 дней"].append(group["name"])
+        elif cycle <= 90:
+            cycle_groups["60-90 дней"].append(group["name"])
+        else:
+            cycle_groups["90+ дней"].append(group["name"])
+    
+    # График
+    cycle_counts = {k: len(v) for k, v in cycle_groups.items()}
+    
+    fig = go.Figure(data=[go.Bar(
+        x=list(cycle_counts.keys()),
+        y=list(cycle_counts.values()),
+        marker=dict(color=['#4CAF50', '#FFC107', '#F44336']),
+        text=list(cycle_counts.values()),
+        textposition='auto',
+        textfont=dict(size=16),
+        hovertemplate='<b>%{x}</b><br>Групп: %{y}<extra></extra>'
+    )])
+    
+    fig.update_layout(
+        title=dict(text="Количество групп по циклам поставки", font=dict(size=18, family="Arial")),
+        xaxis_title="Цикл поставки",
+        yaxis_title="Количество групп",
+        showlegend=False,
+        height=400,
+        font=dict(size=14, family="Arial"),
+        xaxis=dict(
+            title_font=dict(size=16),
+            tickfont=dict(size=14)
+        ),
+        yaxis=dict(
+            title_font=dict(size=16),
+            tickfont=dict(size=14)
+        )
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Детализация по клику (expandable)
+    with st.expander("Показать детали по циклам"):
+        for cycle_name, groups in cycle_groups.items():
+            if groups:
+                st.write(f"**{cycle_name}** ({len(groups)} групп):")
+                for g in groups:
+                    st.write(f"• {g}")
+
+
+# ============================================================================
+# СТРАНИЦА: КАЛЕНДАРЬ ЗАКАЗОВ
+# ============================================================================
+elif page == "📅 Календарь заказов":
+    st.title("📅 Календарь заказов")
+    st.info("Показывает какие заказы нужно сделать в выбранном месяце")
+    
+    # Проверяем наличие результатов
+    if st.session_state.results is None:
+        st.warning("⚠️ Сначала выполните расчёт (кнопка '🔄 Пересчитать' в боковом меню)")
+        st.stop()
+    
+    # Функция определения срочности
+    def get_urgency(buffer):
+        """Определить срочность по буферу"""
+        if buffer < 0.5:
+            return "🔴 Очень срочно"
+        elif buffer < 0.75:
+            return "🟠 Срочно"
+        elif buffer < 1.0:
+            return "🟡 Есть время"
+        else:
+            return "🟢 Можно не торопиться"
+    
+    # ВЫБОР МЕСЯЦА
+    month_options = [get_month_label(i) for i in range(12)]  # Первые 12 месяцев
+    selected_month = st.selectbox("Выберите месяц:", month_options)
+    
+    # Находим индекс выбранного месяца
+    selected_mi = month_options.index(selected_month)
+    
+    st.divider()
+    
+    # Собираем заказы для выбранного месяца
+    orders_data = []
+    
+    for group_name, group_results in st.session_state.results.items():
+        r = group_results[selected_mi]
+        if r["containers"] > 0:  # Есть заказ в этом месяце
+            # Находим группу для получения cycle
+            group = next(g for g in st.session_state.groups if g["name"] == group_name)
+            arrival_mi = selected_mi + (group["cycle"] // 30)
+            arrival_month = get_month_label(arrival_mi)
+            
+            # Определяем срочность
+            # ВАЖНО: проверяем in_transit для месяца ПРИБЫТИЯ, а не месяца заказа
+            if arrival_mi < len(group_results):
+                r_arrival = group_results[arrival_mi]
+                if r_arrival["in_transit"]:
+                    urgency = "📦 Уже заказан"
+                else:
+                    urgency = get_urgency(r["w_buf_before"])
+            else:
+                # Приход за пределами планирования
+                urgency = get_urgency(r["w_buf_before"])
+            
+            orders_data.append({
+                "Группа": group_name,
+                "Контейнеров": r["containers"],
+                "Месяц прибытия": arrival_month,
+                "Срочность": urgency
+            })
+    
+    if orders_data:
+        orders_df = pd.DataFrame(orders_data)
+        
+        # Сортируем по срочности
+        urgency_order = {
+            "🔴 Очень срочно": 0,
+            "🟠 Срочно": 1,
+            "🟡 Есть время": 2,
+            "🟢 Можно не торопиться": 3,
+            "📦 Уже заказан": 4
+        }
+        orders_df["_sort"] = orders_df["Срочность"].map(urgency_order)
+        orders_df = orders_df.sort_values("_sort").drop("_sort", axis=1).reset_index(drop=True)
+        
+        st.subheader(f"Заказы на {selected_month}")
+        st.dataframe(orders_df, use_container_width=True, hide_index=True)
+        
+        # Статистика
+        st.divider()
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Групп для заказа", len(orders_df))
+        with col2:
+            total_containers = orders_df["Контейнеров"].sum()
+            st.metric("Всего контейнеров", total_containers)
+        with col3:
+            # Считаем срочные заказы
+            urgent_count = len(orders_df[orders_df["Срочность"].isin(["🔴 Очень срочно", "🟠 Срочно"])])
+            st.metric("Срочных заказов", urgent_count)
+    else:
+        st.info(f"Нет заказов на {selected_month}")
+
+
+# ============================================================================
+# СТРАНИЦА: КАЛЕНДАРЬ ПОСТАВОК
+# ============================================================================
+elif page == "🚚 Календарь поставок":
+    st.title("🚚 Календарь поставок")
+    st.info("Показывает когда приходят контейнеры по каждой группе")
+    
+    # Проверяем наличие результатов
+    if st.session_state.results is None:
+        st.warning("⚠️ Сначала выполните расчёт (кнопка '🔄 Пересчитать' в боковом меню)")
+        st.stop()
+    
+    # ВЫБОР ПЕРИОДА
+    period_options = ["За весь период"] + [get_month_label(i) for i in range(12)]
+    selected_period = st.selectbox("Выберите период:", period_options)
+    
+    st.divider()
+    
+    # Определяем какие месяцы показывать
+    if selected_period == "За весь период":
+        months_to_show = list(range(12))
+        show_all = True
+    else:
+        selected_mi = period_options.index(selected_period) - 1  # -1 потому что первый элемент "За весь период"
+        months_to_show = [selected_mi]
+        show_all = False
+    
+    # Создаём таблицу: группы × месяцы
+    table_data = []
+    
+    for group in st.session_state.groups:
+        group_name = group["name"]
+        group_results = st.session_state.results[group_name]
+        
+        row = {"Группа": group_name}
+        
+        # Для каждого месяца
+        for mi in months_to_show:
+            month_label = get_month_label(mi)
+            r = group_results[mi]
+            
+            # Вычисляем количество контейнеров
+            if r["arrive"] > 0:
+                # Используем unit_container если есть
+                container_size = group.get("unit_container", group["container"])
+                num_containers = round(r["arrive"] / container_size)
+                
+                # Добавляем цветной индикатор
+                if r["in_transit"]:
+                    row[month_label] = f"🟤 {num_containers}"  # Заказан
+                else:
+                    row[month_label] = f"🟢 {num_containers}"  # Новый
+            else:
+                row[month_label] = ""
+        
+        # Итого по группе (только если показываем весь период)
+        if show_all:
+            total = sum(
+                round(group_results[mi]["arrive"] / group.get("unit_container", group["container"])) 
+                for mi in months_to_show 
+                if group_results[mi]["arrive"] > 0
+            )
+            row["ВСЕГО"] = total if total > 0 else ""
+        
+        table_data.append(row)
+    
+    # Создаём DataFrame
+    df = pd.DataFrame(table_data)
+    
+    # Добавляем строку ИТОГО
+    totals_row = {"Группа": "ИТОГО"}
+    for mi in months_to_show:
+        month_label = get_month_label(mi)
+        total = sum(
+            round(st.session_state.results[g["name"]][mi]["arrive"] / g.get("unit_container", g["container"]))
+            for g in st.session_state.groups
+            if st.session_state.results[g["name"]][mi]["arrive"] > 0
+        )
+        totals_row[month_label] = total if total > 0 else ""
+    
+    if show_all:
+        grand_total = sum(
+            round(st.session_state.results[g["name"]][mi]["arrive"] / g.get("unit_container", g["container"]))
+            for g in st.session_state.groups
+            for mi in months_to_show
+            if st.session_state.results[g["name"]][mi]["arrive"] > 0
+        )
+        totals_row["ВСЕГО"] = grand_total if grand_total > 0 else ""
+    
+    # Добавляем строку ИТОГО в конец
+    df = pd.concat([df, pd.DataFrame([totals_row])], ignore_index=True)
+    
+    # Отображаем таблицу
+    st.subheader(f"Календарь поставок: {selected_period}")
+    st.dataframe(df, use_container_width=True, hide_index=True, height=600)
+    
+    # Статистика
+    if show_all:
+        st.divider()
+        col1, col2 = st.columns(2)
+        with col1:
+            groups_with_arrivals = len([g for g in st.session_state.groups if any(
+                st.session_state.results[g["name"]][mi]["arrive"] > 0 for mi in months_to_show
+            )])
+            st.metric("Групп с приходами", groups_with_arrivals)
+        with col2:
+            st.metric("Всего контейнеров", grand_total if 'grand_total' in locals() else 0)
+        
+    else:
+        st.info("Нет приходов для отображения")
 
 
 # Футер
 st.divider()
-st.caption("Система планирования закупок на 18 месяцев | v1.0")
+st.caption("Система планирования закупок на 12 месяцев | v1.0")
