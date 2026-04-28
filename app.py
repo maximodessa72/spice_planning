@@ -621,7 +621,7 @@ elif page == "✅ Подтверждение заказов":
                 r = group_results[mi]
                 
                 if r["containers"] > 0:
-                    arrival_mi = mi + (group["cycle"] // 30)
+                    arrival_mi = mi + math.ceil(group["cycle"] / 30)
                     is_fixed = arrival_mi < len(group_results) and group_results[arrival_mi]["in_transit"]
                     
                     if not is_fixed:
