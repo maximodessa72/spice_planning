@@ -699,6 +699,15 @@ elif page == "✅ Подтверждение заказов":
                 key=f"total_weight_{selected_group_name}_{selected_order_idx}"
             )
             
+            # Выбор недели прихода
+            week_arrival = st.selectbox(
+                "Неделя прихода:",
+                options=[1, 2, 3, 4],
+                format_func=lambda x: f"Неделя {x}",
+                key=f"week_arrival_{selected_group_name}_{selected_order_idx}",
+                help="Укажите на какую неделю месяца запланирован приход"
+            )
+            
             st.divider()
             
             # Таблица комплектации
@@ -739,6 +748,11 @@ elif page == "✅ Подтверждение заказов":
                     # Фиксируем в данных
                     group["in_transit"][arrival_mi] = total_weight
                     
+                    # Сохраняем номер недели прихода
+                    if "week_arrival" not in group:
+                        group["week_arrival"] = {}
+                    group["week_arrival"][arrival_mi] = week_arrival
+                    
                     for item in group["items"]:
                         if fix_data[item["name"]] > 0:
                             item["in_transit"][arrival_mi] = fix_data[item["name"]]
@@ -772,6 +786,9 @@ elif page == "✅ Подтверждение заказов":
         for group in st.session_state.groups:
             for mi, weight in group.get("in_transit", {}).items():
                 if weight > 0:
+                    # Получаем номер недели если есть
+                    week_num = group.get("week_arrival", {}).get(mi, None)
+                    
                     # Собираем комплектацию
                     composition = []
                     for item in group["items"]:
@@ -782,19 +799,42 @@ elif page == "✅ Подтверждение заказов":
                     fixed_orders.append({
                         "Группа": group["name"],
                         "Месяц прихода": get_month_label(mi),
+                        "Неделя": f"Неделя {week_num}" if week_num else "—",
                         "Вес (кг)": f"{weight:,}",
                         "Позиций": len(composition),
                         "Комплектация": "\n".join(composition),
                         "_group": group,
-                        "_mi": mi
+                        "_mi": mi,
+                        "_week": week_num
                     })
         
         if fixed_orders:
-            st.write(f"**Всего подтверждённых заказов:** {len(fixed_orders)}")
+            # ФИЛЬТР ПО ГРУППАМ
+            all_groups = sorted(list(set([o["Группа"] for o in fixed_orders])))
+            
+            # Добавляем опцию "Все группы"
+            filter_options = ["Все группы"] + all_groups
+            
+            selected_filter = st.selectbox(
+                "Показать заказы группы:",
+                options=filter_options,
+                key="filter_confirmed_orders"
+            )
+            
+            # Фильтруем заказы
+            if selected_filter == "Все группы":
+                filtered_orders = fixed_orders
+            else:
+                filtered_orders = [o for o in fixed_orders if o["Группа"] == selected_filter]
+            
+            st.write(f"**Показано заказов:** {len(filtered_orders)} из {len(fixed_orders)}")
+            
+            st.divider()
             
             # Показываем список
-            for idx, order in enumerate(fixed_orders):
-                with st.expander(f"**{order['Группа']}** → {order['Месяц прихода']} ({order['Вес (кг)']} кг)"):
+            for idx, order in enumerate(filtered_orders):
+                week_info = f" — {order['Неделя']}" if order['_week'] else ""
+                with st.expander(f"**{order['Группа']}** → {order['Месяц прихода']}{week_info} ({order['Вес (кг)']} кг)"):
                     st.write("**Комплектация:**")
                     st.text(order["Комплектация"])
                     
