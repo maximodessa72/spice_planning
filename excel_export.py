@@ -292,7 +292,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                 # 4. Заказ
                 c = ws.cell(row=data_row, column=col + 3)
                 if r["containers"] > 0:
-                    target_month = get_month_label(mi + (group["cycle"] // 30))
+                    target_month = get_month_label(mi + math.ceil(group["cycle"] / 30))
                     c.value = f"{r['containers']} конт.\n→ {target_month}"
                     c.font = Font(name='Arial', bold=True, size=8, color='1565C0')
                     c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -551,7 +551,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
             
             if r["containers"] > 0:
                 # Есть заказ - показываем месяц прибытия
-                arrival_mi = mi + (group["cycle"] // 30)
+                arrival_mi = mi + math.ceil(group["cycle"] / 30)
                 arrival_month = get_month_label(arrival_mi)
                 
                 # Определяем цвет

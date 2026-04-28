@@ -3,6 +3,7 @@
 Интерактивный интерфейс для редактирования данных и просмотра результатов
 """
 
+import math
 import streamlit as st
 import pandas as pd
 from data import GROUPS, N_MONTHS
@@ -1541,7 +1542,7 @@ elif page == "📅 Календарь заказов":
         if r["containers"] > 0:  # Есть заказ в этом месяце
             # Находим группу для получения cycle
             group = next(g for g in st.session_state.groups if g["name"] == group_name)
-            arrival_mi = selected_mi + (group["cycle"] // 30)
+            arrival_mi = selected_mi + math.ceil(group["cycle"] / 30)
             arrival_month = get_month_label(arrival_mi)
             
             # Определяем срочность
