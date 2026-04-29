@@ -226,8 +226,8 @@ if page == "🏠 Главная":
     # Показываем текущий горизонт
     from data import CURRENT_START_MONTH
     start_label = get_month_label(0)
-    end_label = get_month_label(17)
-    st.caption(f"📅 Горизонт планирования: **{start_label} — {end_label}** (18 месяцев)")
+    end_label = get_month_label(11)
+    st.caption(f"📅 Горизонт планирования: **{start_label} — {end_label}** (12 месяцев)")
     
     if CURRENT_START_MONTH > 0:
         st.info(f"ℹ️ Система автоматически обновила горизонт планирования. Прошлые месяцы удалены, подтверждённые заказы из прошлого очищены.")

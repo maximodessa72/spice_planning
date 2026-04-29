@@ -90,16 +90,16 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     bd_thick_right = Border(left=thin, right=thick, top=thin, bottom=thin)  # С толстой правой границей
     
     # Заголовок (строка 1)
-    ws.merge_cells('A1:BM1')  # Покрываем все колонки
+    ws.merge_cells('A1:AY1')  # Покрываем все колонки (3 + 12*4 = 51 = AY)
     cell = ws['A1']
     today = datetime.now().strftime("%d %B %Y").replace("January", "січня").replace("February", "лютого").replace("March", "березня").replace("April", "квітня")
-    cell.value = f"План поставок + Балансування  |  Буфер моделі: г.4=1.2, решта=1.0  |  Мішок: 25 кг  |  квіт 2026 — вер 2027  |  {today}"
+    cell.value = f"План поставок + Балансування  |  Буфер моделі: г.4=1.2, решта=1.0  |  Мішок: 25 кг  |  квіт 2026 — бер 2027  |  {today}"
     cell.font = Font(name='Arial', bold=True, size=11, color='000000')
     cell.alignment = Alignment(horizontal='center', vertical='center')
     
     # СТРОКА 2 - ЗАГОЛОВКИ МЕСЯЦЕВ (начинаются с колонки 4)
     col = 4  # Месяцы начинаются с D (колонка 4)
-    for mi in range(18):
+    for mi in range(12):
         month_label = get_month_label(mi)
         
         # Объединяем 4 колонки для названия месяца
@@ -152,7 +152,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     col = 4
     headers = ["Ост.нач\n(кг)", "Срок реал.\nнач (мес)", "Приход\n(кг)", "Заказ\n→ приход"]
     
-    for mi in range(18):
+    for mi in range(12):
         for i, h in enumerate(headers):
             c = ws.cell(row=subheader_row, column=col + i)
             c.value = h
@@ -228,7 +228,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
         
         # Данные группы по месяцам (начинаются с колонки 4)
         col = 4
-        for mi in range(18):
+        for mi in range(12):
             r = group_results[mi]
             
             if is_active:
@@ -398,7 +398,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
             
             # Данные позиции по месяцам (начинаются с колонки 4)
             col = 4
-            for mi in range(18):
+            for mi in range(12):
                 r = group_results[mi]
                 
                 # 1. Остаток позиции на начало (с цветом буфера)
