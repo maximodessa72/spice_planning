@@ -155,7 +155,7 @@ with st.sidebar:
     
     page = st.radio(
         "Выберите страницу:",
-        ["🏠 Главная", "📥 Импорт данных", "✅ Подтверждение заказов", "⚙️ Управление группами", "📊 Редактор данных", "📈 Аналитика", "📅 Календарь заказов", "🚚 Календарь поставок"],
+        ["🏠 Главная", "📥 Импорт данных", "✅ Подтверждение заказов", "⚙️ Управление группами", "📊 Редактор данных", "📈 Аналитика", "📅 Календарь заказов", "🚚 Календарь поставок", "🌱 Сезоны урожаев"],
         label_visibility="collapsed"
     )
     
@@ -259,6 +259,174 @@ if page == "🏠 Главная":
             stats["num_groups"],
             help="Количество товарных групп"
         )
+    
+    st.divider()
+    
+    # Урожай текущего месяца
+    st.subheader("🌱 Урожай текущего месяца")
+    
+    try:
+        import openpyxl
+        from datetime import datetime
+        
+        # Определяем текущий месяц (индекс 0-11)
+        current_month_idx = datetime.now().month - 1  # 0=Янв, 1=Фев, ..., 11=Дек
+        months_names = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
+                       'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+        months_short = ['ЯНВ', 'ФЕВ', 'МАР', 'АПР', 'МАЙ', 'ИЮН', 'ИЮЛ', 'АВГ', 'СЕН', 'ОКТ', 'НОЯ', 'ДЕК']
+        
+        # Загружаем данные из Excel
+        wb = openpyxl.load_workbook('сезонность.xlsx')
+        ws = wb['сезонность']
+        
+        month_col = 4 + current_month_idx  # Колонка текущего месяца
+        
+        # Находим все объединённые группы по колонкам B-C (продукты)
+        product_groups = {}
+        for merged_range in ws.merged_cells.ranges:
+            if merged_range.min_col <= 3 and merged_range.max_col >= 3:
+                rows_in_group = list(range(merged_range.min_row, merged_range.max_row + 1))
+                product_groups[merged_range.min_row] = rows_in_group
+        
+        # Собираем продукты с урожаем
+        current_harvest = []
+        processed_rows = set()
+        
+        for row in range(3, ws.max_row + 1):
+            if row in processed_rows:
+                continue
+            
+            num_cell = ws.cell(row=row, column=2)
+            name_cell = ws.cell(row=row, column=3)
+            
+            # Пропускаем разделители
+            if num_cell.fill and num_cell.fill.start_color and hasattr(num_cell.fill.start_color, 'rgb'):
+                rgb = str(num_cell.fill.start_color.rgb)
+                if '1F4E79' in rgb:
+                    continue
+            
+            # Пропускаем строки без названия (но не части объединений)
+            if not name_cell.value or str(name_cell.value).strip() == '':
+                is_part_of_group = False
+                for start_row, rows_in_group in product_groups.items():
+                    if row in rows_in_group and row != start_row:
+                        is_part_of_group = True
+                        break
+                
+                if not is_part_of_group:
+                    continue
+            
+            product_name = str(name_cell.value).strip() if name_cell.value else ""
+            
+            # Определяем все строки этого продукта
+            if row in product_groups:
+                rows_to_check = product_groups[row]
+                processed_rows.update(rows_to_check)
+            else:
+                rows_to_check = [row]
+                processed_rows.add(row)
+            
+            # Проверяем все строки на урожай в текущем месяце
+            variants = []
+            for check_row in rows_to_check:
+                comment_cell = ws.cell(row=check_row, column=16)
+                comment = str(comment_cell.value).strip() if comment_cell.value else ""
+                
+                # Проверяем наличие урожая в текущем месяце
+                has_harvest_this_month = False
+                harvest_color = None
+                harvest_period = ""
+                
+                # Находим все объединённые диапазоны месяцев для этой строки
+                for merged in ws.merged_cells.ranges:
+                    if merged.min_row == check_row and merged.min_col >= 4 and merged.max_col <= 15:
+                        # Это объединение месяцев
+                        start_month_idx = merged.min_col - 4  # 0-11
+                        end_month_idx = merged.max_col - 4
+                        
+                        # Текущий месяц попадает в этот диапазон?
+                        if start_month_idx <= current_month_idx <= end_month_idx:
+                            # Берём цвет из первой ячейки диапазона
+                            first_cell = ws.cell(row=check_row, column=merged.min_col)
+                            if first_cell.fill and first_cell.fill.start_color and hasattr(first_cell.fill.start_color, 'rgb'):
+                                rgb = str(first_cell.fill.start_color.rgb)
+                                if rgb and rgb not in ['00000000', 'FFFFFFFF', 'None'] and '1F4E79' not in rgb:
+                                    harvest_color = '#' + (rgb[2:8] if rgb.startswith('FF') else rgb[:6])
+                                    has_harvest_this_month = True
+                                    
+                                    # Формируем период
+                                    if start_month_idx == end_month_idx:
+                                        harvest_period = months_short[start_month_idx]
+                                    else:
+                                        harvest_period = f"{months_short[start_month_idx]}-{months_short[end_month_idx]}"
+                                    break
+                
+                # Если не нашли объединение - проверяем обычную ячейку текущего месяца
+                if not has_harvest_this_month:
+                    month_cell = ws.cell(row=check_row, column=month_col)
+                    if month_cell.fill and month_cell.fill.start_color and hasattr(month_cell.fill.start_color, 'rgb'):
+                        rgb = str(month_cell.fill.start_color.rgb)
+                        if rgb and rgb not in ['00000000', 'FFFFFFFF', 'None'] and '1F4E79' not in rgb:
+                            harvest_color = '#' + (rgb[2:8] if rgb.startswith('FF') else rgb[:6])
+                            has_harvest_this_month = True
+                            harvest_period = months_short[current_month_idx]
+                
+                if has_harvest_this_month and harvest_color:
+                    variants.append((comment, harvest_color, harvest_period))
+            
+            # Добавляем продукт если есть урожай
+            if variants and product_name:
+                current_harvest.append((product_name, variants))
+        
+        if current_harvest:
+            st.success(f"**{months_names[current_month_idx]}**: созревает **{len(current_harvest)}** продуктов")
+            
+            # Показываем продукты колонками
+            cols = st.columns(3)
+            col_idx = 0
+            
+            for product, variants in current_harvest:
+                with cols[col_idx % 3]:
+                    if len(variants) == 1:
+                        # Один вариант
+                        comment, color, period = variants[0]
+                        
+                        # Формируем текст
+                        if comment:
+                            display_text = f"{product} ({period}, {comment})"
+                        else:
+                            display_text = f"{product} ({period})"
+                        
+                        st.markdown(
+                            f'<div style="padding: 5px; margin: 2px; border-left: 4px solid {color};">'
+                            f'<span style="font-size: 13px;">• {display_text}</span></div>',
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        # Несколько вариантов
+                        st.markdown(
+                            f'<div style="padding: 5px; margin: 2px; font-weight: bold;">'
+                            f'<span style="font-size: 13px;">• {product}</span></div>',
+                            unsafe_allow_html=True
+                        )
+                        for comment, color, period in variants:
+                            display_text = f"{comment} ({period})" if comment else period
+                            st.markdown(
+                                f'<div style="padding: 3px 5px 3px 20px; margin: 1px; border-left: 3px solid {color};">'
+                                f'<span style="font-size: 12px; font-style: italic;">→ {display_text}</span></div>',
+                                unsafe_allow_html=True
+                            )
+                
+                col_idx += 1
+        else:
+            st.info(f"В месяце **{months_names[current_month_idx]}** нет продуктов в сезоне урожая")
+    
+    except FileNotFoundError:
+        st.warning("⚠️ Файл 'сезонность.xlsx' не найден - информация об урожае недоступна")
+    except Exception as e:
+        st.warning(f"⚠️ Не удалось загрузить данные урожая: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
     
     st.divider()
     
@@ -1747,6 +1915,330 @@ elif page == "🚚 Календарь поставок":
         
     else:
         st.info("Нет приходов для отображения")
+
+
+
+# ========== СЕЗОНЫ УРОЖАЕВ ==========
+elif page == "🌱 Сезоны урожаев":
+    st.title("🌱 Сезоны урожаев")
+    st.caption("Календарь созревания продуктов по месяцам года")
+    
+    # Загружаем данные из Excel
+    try:
+        import openpyxl
+        
+        wb = openpyxl.load_workbook('сезонность.xlsx')
+        ws = wb['сезонность']
+        
+        # Находим все объединённые группы по колонкам B-C (продукты)
+        product_groups = {}
+        for merged_range in ws.merged_cells.ranges:
+            if merged_range.min_col <= 3 and merged_range.max_col >= 3:  # Колонка C (название)
+                rows_in_group = list(range(merged_range.min_row, merged_range.max_row + 1))
+                product_groups[merged_range.min_row] = rows_in_group
+        
+        # Читаем данные
+        table_rows = []
+        processed_rows = set()
+        
+        for row in range(3, ws.max_row + 1):
+            if row in processed_rows:
+                continue
+            
+            num_cell = ws.cell(row=row, column=2)
+            name_cell = ws.cell(row=row, column=3)
+            
+            # Пропускаем разделители
+            is_separator = False
+            if num_cell.fill and num_cell.fill.start_color and hasattr(num_cell.fill.start_color, 'rgb'):
+                rgb = str(num_cell.fill.start_color.rgb)
+                if '1F4E79' in rgb:
+                    is_separator = True
+            
+            if is_separator:
+                table_rows.append({'type': 'separator'})
+                continue
+            
+            if not name_cell.value or str(name_cell.value).strip() == '':
+                continue
+            
+            num_val = str(num_cell.value) if num_cell.value else ''
+            name_val = str(name_cell.value).strip()
+            
+            # Многострочный или однострочный продукт
+            if row in product_groups:
+                rows_in_product = product_groups[row]
+                processed_rows.update(rows_in_product)
+                
+                # Заголовок продукта
+                table_rows.append({
+                    'type': 'product_header',
+                    'num': num_val,
+                    'name': name_val,
+                })
+                
+                # Подстроки для каждой страны
+                for sub_row in rows_in_product:
+                    comment_cell = ws.cell(row=sub_row, column=16)
+                    comment = str(comment_cell.value).strip() if comment_cell.value else ''
+                    
+                    if not comment:
+                        continue
+                    
+                    # Находим объединённые ячейки месяцев для этой строки
+                    month_merges = {}
+                    for merged in ws.merged_cells.ranges:
+                        if merged.min_row == sub_row and merged.min_col >= 4 and merged.max_col <= 15:
+                            # Диапазон месяцев (относительно колонки 4)
+                            start_month = merged.min_col - 4
+                            end_month = merged.max_col - 4
+                            for m in range(start_month, end_month + 1):
+                                month_merges[m] = (start_month, end_month)
+                    
+                    # Читаем месяцы с учётом объединений
+                    months_data = []
+                    has_color = False
+                    
+                    for month_idx in range(12):
+                        col = 4 + month_idx
+                        cell = ws.cell(row=sub_row, column=col)
+                        
+                        # Проверяем объединение
+                        if month_idx in month_merges:
+                            start_m, end_m = month_merges[month_idx]
+                            if month_idx == start_m:
+                                # Начало объединения - берём цвет и colspan
+                                color = None
+                                if cell.fill and cell.fill.start_color and hasattr(cell.fill.start_color, 'rgb'):
+                                    rgb = str(cell.fill.start_color.rgb)
+                                    if rgb and rgb not in ['00000000', 'FFFFFFFF', 'None'] and '1F4E79' not in rgb:
+                                        color = '#' + (rgb[2:8] if rgb.startswith('FF') else rgb[:6])
+                                        has_color = True
+                                
+                                months_data.append({
+                                    'color': color,
+                                    'colspan': end_m - start_m + 1
+                                })
+                            else:
+                                # Продолжение объединения - пропускаем
+                                months_data.append({'colspan': 0})
+                        else:
+                            # Обычная ячейка
+                            color = None
+                            if cell.fill and cell.fill.start_color and hasattr(cell.fill.start_color, 'rgb'):
+                                rgb = str(cell.fill.start_color.rgb)
+                                if rgb and rgb not in ['00000000', 'FFFFFFFF', 'None'] and '1F4E79' not in rgb:
+                                    color = '#' + (rgb[2:8] if rgb.startswith('FF') else rgb[:6])
+                                    has_color = True
+                            
+                            months_data.append({
+                                'color': color,
+                                'colspan': 1
+                            })
+                    
+                    if has_color:
+                        table_rows.append({
+                            'type': 'product_subrow',
+                            'comment': comment,
+                            'months': months_data
+                        })
+            else:
+                # Однострочный продукт
+                processed_rows.add(row)
+                comment_cell = ws.cell(row=row, column=16)
+                comment = str(comment_cell.value).strip() if comment_cell.value else ''
+                
+                # Находим объединённые ячейки месяцев
+                month_merges = {}
+                for merged in ws.merged_cells.ranges:
+                    if merged.min_row == row and merged.min_col >= 4 and merged.max_col <= 15:
+                        start_month = merged.min_col - 4
+                        end_month = merged.max_col - 4
+                        for m in range(start_month, end_month + 1):
+                            month_merges[m] = (start_month, end_month)
+                
+                # Читаем месяцы
+                months_data = []
+                has_color = False
+                
+                for month_idx in range(12):
+                    col = 4 + month_idx
+                    cell = ws.cell(row=row, column=col)
+                    
+                    if month_idx in month_merges:
+                        start_m, end_m = month_merges[month_idx]
+                        if month_idx == start_m:
+                            color = None
+                            if cell.fill and cell.fill.start_color and hasattr(cell.fill.start_color, 'rgb'):
+                                rgb = str(cell.fill.start_color.rgb)
+                                if rgb and rgb not in ['00000000', 'FFFFFFFF', 'None'] and '1F4E79' not in rgb:
+                                    color = '#' + (rgb[2:8] if rgb.startswith('FF') else rgb[:6])
+                                    has_color = True
+                            
+                            months_data.append({
+                                'color': color,
+                                'colspan': end_m - start_m + 1
+                            })
+                        else:
+                            months_data.append({'colspan': 0})
+                    else:
+                        color = None
+                        if cell.fill and cell.fill.start_color and hasattr(cell.fill.start_color, 'rgb'):
+                            rgb = str(cell.fill.start_color.rgb)
+                            if rgb and rgb not in ['00000000', 'FFFFFFFF', 'None'] and '1F4E79' not in rgb:
+                                color = '#' + (rgb[2:8] if rgb.startswith('FF') else rgb[:6])
+                                has_color = True
+                        
+                        months_data.append({
+                            'color': color,
+                            'colspan': 1
+                        })
+                
+                if has_color:
+                    table_rows.append({
+                        'type': 'product_single',
+                        'num': num_val,
+                        'name': name_val,
+                        'comment': comment,
+                        'months': months_data
+                    })
+        
+        if not table_rows:
+            st.warning("⚠️ Данные сезонности не найдены в файле")
+        else:
+            months = ['ЯНВ', 'ФЕВ', 'МАР', 'АПР', 'МАЙ', 'ИЮН', 'ИЮЛ', 'АВГ', 'СЕН', 'ОКТ', 'НОЯ', 'ДЕК']
+            
+            count_products = len([r for r in table_rows if r['type'] in ['product_header', 'product_single']])
+            st.subheader("📊 Календарь урожая")
+            st.caption(f"Показано {count_products} продуктов")
+            
+            # HTML таблица
+            table_html = '''
+            <style>
+                .seasonality-table-container {
+                    max-height: 700px;
+                    overflow-y: auto;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                }
+                .seasonality-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 13px;
+                }
+                .seasonality-table thead {
+                    position: sticky;
+                    top: 0;
+                    z-index: 10;
+                    background-color: #1F4E79;
+                    color: white;
+                }
+                .seasonality-table th {
+                    border: 1px solid #ddd;
+                    padding: 10px 8px;
+                    text-align: center;
+                    font-weight: bold;
+                }
+                .seasonality-table td {
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                }
+                .seasonality-table tr.product-row:hover {
+                    background-color: #f9f9f9;
+                }
+                .seasonality-table tr.separator-row {
+                    height: 8px;
+                    background-color: #f0f0f0;
+                }
+                .seasonality-table tr.separator-row td {
+                    border: none;
+                    padding: 0;
+                }
+                .seasonality-table tr.subrow {
+                    background-color: #fafafa;
+                }
+                .seasonality-table tr.header-row {
+                    font-weight: bold;
+                }
+            </style>
+            <div class="seasonality-table-container">
+                <table class="seasonality-table">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left; width: 40px;">№</th>
+                            <th style="text-align: left; width: 300px;">Продукт</th>
+            '''
+            
+            for month in months:
+                table_html += f'<th style="width: 65px;">{month}</th>'
+            table_html += '</tr></thead><tbody>'
+            
+            # Строки
+            for row_data in table_rows:
+                if row_data['type'] == 'separator':
+                    table_html += f'<tr class="separator-row"><td colspan="14"></td></tr>'
+                
+                elif row_data['type'] == 'product_header':
+                    table_html += '<tr class="product-row header-row">'
+                    table_html += f'<td style="text-align: center; color: #666;">{row_data["num"]}</td>'
+                    table_html += f'<td style="font-weight: bold;">{row_data["name"]}</td>'
+                    for _ in range(12):
+                        table_html += '<td></td>'
+                    table_html += '</tr>'
+                
+                elif row_data['type'] == 'product_subrow':
+                    table_html += '<tr class="product-row subrow">'
+                    table_html += '<td></td>'
+                    table_html += f'<td style="padding-left: 25px; font-style: italic; color: #555;">→ {row_data["comment"]}</td>'
+                    
+                    for month_data in row_data['months']:
+                        if month_data['colspan'] == 0:
+                            continue
+                        
+                        color = month_data.get('color')
+                        colspan = month_data['colspan']
+                        
+                        if colspan > 1:
+                            bg = f'background-color: {color};' if color else ''
+                            table_html += f'<td colspan="{colspan}" style="{bg}"></td>'
+                        else:
+                            bg = f'background-color: {color};' if color else ''
+                            table_html += f'<td style="{bg}"></td>'
+                    
+                    table_html += '</tr>'
+                
+                elif row_data['type'] == 'product_single':
+                    table_html += '<tr class="product-row">'
+                    table_html += f'<td style="text-align: center; color: #666;">{row_data["num"]}</td>'
+                    table_html += f'<td style="font-weight: bold;">{row_data["name"]}</td>'
+                    
+                    for month_data in row_data['months']:
+                        if month_data['colspan'] == 0:
+                            continue
+                        
+                        color = month_data.get('color')
+                        colspan = month_data['colspan']
+                        
+                        if colspan > 1:
+                            bg = f'background-color: {color};' if color else ''
+                            table_html += f'<td colspan="{colspan}" style="{bg}"></td>'
+                        else:
+                            bg = f'background-color: {color};' if color else ''
+                            table_html += f'<td style="{bg}"></td>'
+                    
+                    table_html += '</tr>'
+            
+            table_html += '</tbody></table></div>'
+            
+            st.markdown(table_html, unsafe_allow_html=True)
+    
+    except FileNotFoundError:
+        st.error("❌ Файл 'сезонность.xlsx' не найден")
+        st.info("Убедитесь что файл находится в той же папке что и приложение")
+    except Exception as e:
+        st.error(f"❌ Ошибка при загрузке данных: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 
 
 # Футер
