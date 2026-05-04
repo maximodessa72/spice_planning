@@ -153,11 +153,46 @@ with st.sidebar:
     
     st.divider()
     
-    page = st.radio(
-        "Выберите страницу:",
-        ["🏠 Главная", "📥 Импорт данных", "✅ Подтверждение заказов", "⚙️ Управление группами", "📊 Редактор данных", "📈 Аналитика", "📅 Календарь заказов", "🚚 Календарь поставок", "🌱 Сезоны урожаев"],
+    # УРОВЕНЬ 1: Выбор направления
+    st.markdown("### 🎯 Направление")
+    direction = st.radio(
+        "Выберите направление:",
+        ["📦 Планирование закупок", "📊 Планирование продаж"],
         label_visibility="collapsed"
     )
+    
+    st.divider()
+    
+    # УРОВЕНЬ 2: Выбор страницы в зависимости от направления
+    if direction == "📦 Планирование закупок":
+        st.markdown("### 📄 Страница")
+        page = st.radio(
+            "Выберите страницу:",
+            [
+                "🏠 Главная",
+                "📥 Импорт данных по закупкам",
+                "✅ Подтверждение заказов",
+                "⚙️ Управление группами",
+                "📊 Редактор данных",
+                "📈 Аналитика по закупкам",
+                "📅 Календарь заказов",
+                "🚚 Календарь поставок",
+                "🌱 Сезоны урожаев"
+            ],
+            label_visibility="collapsed"
+        )
+    else:  # Планирование продаж
+        st.markdown("### 📄 Страница")
+        page = st.radio(
+            "Выберите страницу:",
+            [
+                "🏠 Главная (продажи)",
+                "📥 Импорт данных по продажам",
+                "✅ Фиксация даты прихода заказа",
+                "📈 Аналитика по продажам"
+            ],
+            label_visibility="collapsed"
+        )
     
     st.divider()
     
@@ -173,50 +208,114 @@ with st.sidebar:
     
     st.divider()
     
-    # Кнопка экспорта
-    if st.button("💾 Экспорт в Excel", use_container_width=True):
-        try:
-            from excel_export import create_excel
-            import tempfile
-            import os
-            
-            # Проверяем что симуляция выполнена
-            if st.session_state.results is None:
-                recalculate()
-            
-            # Создаём файл во временной директории
-            with st.spinner('Создание Excel файла...'):
-                # Используем временный файл
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-                    output_path = tmp.name
+    # Кнопка экспорта (зависит от направления)
+    if direction == "📦 Планирование закупок":
+        if st.button("💾 Экспорт закупок", use_container_width=True):
+            try:
+                from excel_export import create_excel
+                import tempfile
+                import os
                 
-                create_excel(st.session_state.results, st.session_state.groups, output_path)
+                # Проверяем что симуляция выполнена
+                if st.session_state.results is None:
+                    recalculate()
                 
-                # Читаем файл в память
-                with open(output_path, 'rb') as f:
-                    st.session_state.excel_file = f.read()
+                # Создаём файл во временной директории
+                with st.spinner('Создание Excel файла...'):
+                    # Используем временный файл
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                        output_path = tmp.name
+                    
+                    create_excel(st.session_state.results, st.session_state.groups, output_path)
+                    
+                    # Читаем файл в память
+                    with open(output_path, 'rb') as f:
+                        st.session_state.excel_file = f.read()
+                    
+                    # Удаляем временный файл
+                    try:
+                        os.unlink(output_path)
+                    except:
+                        pass
                 
-                # Удаляем временный файл
-                try:
-                    os.unlink(output_path)
-                except:
-                    pass
-            
-            st.success("✅ Excel файл создан!")
-        except Exception as e:
-            st.error(f"❌ Ошибка при создании файла: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
+                st.success("✅ Excel файл создан!")
+            except Exception as e:
+                st.error(f"❌ Ошибка при создании файла: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+        
+        # Кнопка скачивания (отдельно, чтобы работала после перезагрузки)
+        if st.session_state.excel_file is not None:
+            st.download_button(
+                label="📥 Скачать план_балансировка.xlsx",
+                data=st.session_state.excel_file,
+                file_name="план_балансировка.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
     
-    # Кнопка скачивания (отдельно, чтобы работала после перезагрузки)
-    if st.session_state.excel_file is not None:
-        st.download_button(
-            label="📥 Скачать план_балансировка.xlsx",
-            data=st.session_state.excel_file,
-            file_name="план_балансировка.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+    else:  # Планирование продаж
+        # Проверяем что есть импортированные данные
+        has_prices = len(st.session_state.get("sales_prices", {})) > 0
+        has_plan = len(st.session_state.get("sales_plan_base", {})) > 0
+        
+        if not has_prices or not has_plan:
+            st.warning("⚠️ Сначала импортируйте данные")
+            st.caption("Перейдите в раздел 'Импорт данных по продажам'")
+        else:
+            if st.button("💾 Экспорт продаж", use_container_width=True):
+                try:
+                    from sales_export import create_sales_excel
+                    import tempfile
+                    import os
+                    
+                    # Проверяем что симуляция закупок выполнена
+                    if st.session_state.results is None:
+                        recalculate()
+                    
+                    # Создаём файл во временной директории
+                    with st.spinner('Создание Excel файла продаж...'):
+                        # Используем временный файл
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                            output_path = tmp.name
+                        
+                        create_sales_excel(
+                            procurement_results=st.session_state.results,
+                            groups=st.session_state.groups,
+                            sales_prices=st.session_state.get("sales_prices", {}),
+                            sales_plan_base=st.session_state.get("sales_plan_base", {}),
+                            sales_fact=st.session_state.get("sales_fact", {}),
+                            arrival_fixed_dates=st.session_state.get("arrival_fixed_dates", {}),
+                            filename=output_path
+                        )
+                        
+                        # Читаем файл в память
+                        with open(output_path, 'rb') as f:
+                            st.session_state.sales_excel_file = f.read()
+                        
+                        # Удаляем временный файл
+                        try:
+                            os.unlink(output_path)
+                        except:
+                            pass
+                    
+                    st.success("✅ Excel файл продаж создан!")
+                except Exception as e:
+                    st.error(f"❌ Ошибка при создании файла: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+            
+            # Кнопка скачивания (отдельно, чтобы работала после перезагрузки)
+            if st.session_state.get("sales_excel_file") is not None:
+                st.download_button(
+                    label="📥 Скачать план_продаж.xlsx",
+                    data=st.session_state.sales_excel_file,
+                    file_name="план_продаж.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+
 
 
 # ========== ГЛАВНАЯ СТРАНИЦА ==========
@@ -451,8 +550,8 @@ if page == "🏠 Главная":
 # ============================================================================
 # СТРАНИЦА: ИМПОРТ ДАННЫХ
 # ============================================================================
-elif page == "📥 Импорт данных":
-    st.title("📥 Импорт данных")
+elif page == "📥 Импорт данных по закупкам":
+    st.title("📥 Импорт данных по закупкам")
     st.info("Обновление остатков и планов закупок")
     
     st.markdown("""
@@ -1361,8 +1460,8 @@ elif page == "📊 Редактор данных":
 # ============================================================================
 # СТРАНИЦА: АНАЛИТИКА
 # ============================================================================
-elif page == "📈 Аналитика":
-    st.title("📈 Аналитика закупок")
+elif page == "📈 Аналитика по закупкам":
+    st.title("📈 Аналитика по закупкам")
     st.caption("Визуализация структуры и динамики заказов")
     
     # Пересчёт если нужно
@@ -2241,6 +2340,429 @@ elif page == "🌱 Сезоны урожаев":
         st.code(traceback.format_exc())
 
 
+# ========== СТРАНИЦЫ ПЛАНИРОВАНИЯ ПРОДАЖ ==========
+
+elif page == "🏠 Главная (продажи)":
+    st.title("📊 Планирование продаж")
+    st.caption("📅 Управление планами продаж и аналитика")
+    
+    st.info("🚧 **В разработке**")
+    
+    st.markdown("""
+    ### 📋 Возможности модуля:
+    
+    - **Импорт данных** — загрузка актуальных цен, планов и фактов продаж
+    - **Фиксация прихода** — учёт дат поступления заказов для корректировки планов
+    - **Аналитика** — визуализация динамики продаж и отклонений от плана
+    - **Экспорт** — выгрузка отчётов в Excel
+    
+    Выберите раздел в меню слева для начала работы.
+    """)
+
+
+elif page == "📥 Импорт данных по продажам":
+    st.title("📥 Импорт данных по продажам")
+    st.info("Загрузка актуальных цен, планов и фактов продаж")
+    
+    # Проверка прав доступа
+    user_role = st.session_state.get("user_role", "viewer")
+    if user_role != "admin":
+        st.warning("⚠️ Импорт данных доступен только администраторам")
+        st.stop()
+    
+    # Инициализация данных продаж в session_state
+    if "sales_prices" not in st.session_state:
+        st.session_state.sales_prices = {}
+    if "sales_plan_base" not in st.session_state:
+        st.session_state.sales_plan_base = {}
+    if "sales_fact" not in st.session_state:
+        st.session_state.sales_fact = {}
+    
+    st.markdown("""
+    ### 📋 Три типа импорта данных:
+    
+    Каждый месяц **первого числа** необходимо загрузить три типа данных:
+    """)
+    
+    # Вкладки для разных типов импорта
+    tab1, tab2, tab3 = st.tabs([
+        "💰 Актуальная цена",
+        "📊 План продаж базовый", 
+        "📈 Факт продаж"
+    ])
+    
+    with tab1:
+        st.subheader("💰 Импорт актуальной цены")
+        st.caption("Загрузка цен на текущий месяц — **первого числа текущего месяца**")
+        
+        uploaded_prices = st.file_uploader(
+            "Загрузите файл с актуальными ценами (Excel)",
+            type=['xlsx', 'xls'],
+            key="upload_prices"
+        )
+        
+        if uploaded_prices:
+            try:
+                import tempfile
+                import os
+                from sales_data import import_prices_from_excel
+                
+                # Сохраняем во временный файл
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                    tmp.write(uploaded_prices.getvalue())
+                    tmp_path = tmp.name
+                
+                # Импортируем цены
+                with st.spinner('Загрузка цен...'):
+                    prices = import_prices_from_excel(tmp_path)
+                    st.session_state.sales_prices = prices
+                
+                # Удаляем временный файл
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+                
+                # Статистика
+                total_items = sum(len(items) for items in prices.values())
+                total_groups = len(prices)
+                
+                st.success(f"✅ Импортировано цен: **{total_items}** позиций из **{total_groups}** групп")
+                
+                # Показываем примеры
+                with st.expander("📋 Просмотр загруженных цен (первые 10)"):
+                    count = 0
+                    for group_idx, items in prices.items():
+                        if count >= 10:
+                            break
+                        group_name = GROUPS[group_idx]["name"]
+                        st.markdown(f"**{group_name}**")
+                        for item_idx, price in items.items():
+                            if count >= 10:
+                                break
+                            item_name = GROUPS[group_idx]["items"][item_idx]["name"]
+                            st.write(f"  • {item_name}: {price} грн")
+                            count += 1
+                
+            except Exception as e:
+                st.error(f"❌ Ошибка при импорте: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+    
+    with tab2:
+        st.subheader("📊 Импорт плана продаж базового")
+        st.caption("Загрузка базового плана на текущий месяц — **первого числа текущего месяца**")
+        
+        uploaded_plan = st.file_uploader(
+            "Загрузите файл с планом продаж (Excel)",
+            type=['xlsx', 'xls'],
+            key="upload_plan"
+        )
+        
+        if uploaded_plan:
+            try:
+                import tempfile
+                import os
+                from sales_data import import_sales_plan_from_excel
+                
+                # Сохраняем во временный файл
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                    tmp.write(uploaded_plan.getvalue())
+                    tmp_path = tmp.name
+                
+                # Импортируем план
+                with st.spinner('Загрузка плана продаж...'):
+                    plan = import_sales_plan_from_excel(tmp_path)
+                    st.session_state.sales_plan_base = plan
+                
+                # Удаляем временный файл
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+                
+                # Статистика
+                total_items = sum(len(items) for items in plan.values())
+                total_groups = len(plan)
+                total_kg = sum(sum(items.values()) for items in plan.values())
+                
+                st.success(f"✅ Импортировано планов: **{total_items}** позиций из **{total_groups}** групп")
+                st.info(f"📊 Общий план продаж: **{total_kg:,}** кг/мес")
+                
+                # Показываем примеры
+                with st.expander("📋 Просмотр загруженного плана (первые 10)"):
+                    count = 0
+                    for group_idx, items in plan.items():
+                        if count >= 10:
+                            break
+                        group_name = GROUPS[group_idx]["name"]
+                        st.markdown(f"**{group_name}**")
+                        for item_idx, plan_kg in items.items():
+                            if count >= 10:
+                                break
+                            item_name = GROUPS[group_idx]["items"][item_idx]["name"]
+                            st.write(f"  • {item_name}: {plan_kg:,} кг")
+                            count += 1
+                
+            except Exception as e:
+                st.error(f"❌ Ошибка при импорте: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+    
+    with tab3:
+        st.subheader("📈 Импорт факта продаж")
+        st.caption("Загрузка факта по **закрытому месяцу** — первого числа **следующего** месяца")
+        
+        st.warning("⚠️ **Важно:** Факт продаж загружается в прошлый месяц (месяц -1)")
+        
+        st.info("🚧 **В разработке** — будет доступна загрузка Excel с фактом продаж")
+        
+        uploaded_fact = st.file_uploader(
+            "Загрузите файл с фактом продаж (Excel)",
+            type=['xlsx', 'xls'],
+            key="upload_fact",
+            disabled=True
+        )
+        
+        if uploaded_fact:
+            st.success("✅ Файл загружен")
+
+
+elif page == "✅ Фиксация даты прихода заказа":
+    st.title("✅ Фиксация даты прихода заказа")
+    st.info("Фиксация точных дат прихода контейнеров для текущего месяца")
+    
+    # Проверка прав доступа
+    user_role = st.session_state.get("user_role", "viewer")
+    if user_role != "admin":
+        st.warning("⚠️ Фиксация дат доступна только администраторам")
+        st.stop()
+    
+    # Проверяем что симуляция выполнена
+    if st.session_state.results is None:
+        st.warning("⚠️ Сначала выполните пересчёт закупок")
+        st.stop()
+    
+    # Инициализация хранилища дат
+    if "arrival_fixed_dates" not in st.session_state:
+        st.session_state.arrival_fixed_dates = {}  # {group_name: datetime}
+    
+    from datetime import datetime
+    from sales_data import SALES_BASE_YEAR, SALES_BASE_MONTH
+    
+    # Определяем текущий месяц
+    # Теперь и закупки, и продажи начинаются с ТЕКУЩЕГО месяца (май)
+    # mi=0 = май для обоих
+    
+    procurement_current_mi = 0  # Текущий месяц (май)
+    sales_current_mi = 0  # Текущий месяц (май)
+    
+    # Вычисляем год и месяц текущего месяца
+    current_year = SALES_BASE_YEAR + (SALES_BASE_MONTH - 1 + sales_current_mi) // 12
+    current_month = (SALES_BASE_MONTH - 1 + sales_current_mi) % 12 + 1
+    
+    month_names = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
+                   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+    current_month_name = month_names[current_month - 1]
+    
+    st.markdown(f"### 📅 Текущий месяц: **{current_month_name} {current_year}**")
+    
+    st.markdown("""
+    **Автоматические даты по неделям:**
+    - `пред мес` / `нед 1` → **5-е число**
+    - `нед 2` → **10-е число**
+    - `нед 3` → **15-е число**
+    - `нед 4` → **20-е число**
+    """)
+    
+    # Собираем заказы текущего месяца
+    orders_current_month = []
+    
+    for group in st.session_state.groups:
+        group_name = group["name"]
+        group_results = st.session_state.results.get(group_name, [])
+        
+        # Читаем ТЕКУЩИЙ месяц из симуляции закупок (mi=0)
+        if procurement_current_mi < len(group_results):
+            month_data = group_results[procurement_current_mi]
+            
+            # Проверяем есть ли ПРИХОД в текущем месяце (фиксированный или новый)
+            arrival_kg = month_data.get("arrive", 0)
+            in_transit = month_data.get("in_transit", False)
+            containers = month_data.get("containers", 0)
+            week_label = month_data.get("wl", "")
+            
+            # Показываем все приходы (in_transit означает что товар придёт в этом месяце)
+            if in_transit and arrival_kg > 0:
+                # Определяем автоматическую дату по неделе
+                if "пред" in week_label.lower() or "Тиж. 1" in week_label:
+                    auto_day = 5
+                elif "Тиж. 2" in week_label:
+                    auto_day = 10
+                elif "Тиж. 3" in week_label:
+                    auto_day = 15
+                elif "Тиж. 4" in week_label:
+                    auto_day = 20
+                else:
+                    auto_day = 5  # По умолчанию
+                
+                # Проверяем есть ли зафиксированная дата
+                if group_name in st.session_state.arrival_fixed_dates:
+                    fixed_date = st.session_state.arrival_fixed_dates[group_name]
+                    current_date = fixed_date
+                    is_fixed = True
+                else:
+                    current_date = datetime(current_year, current_month, auto_day)
+                    is_fixed = False
+                
+                orders_current_month.append({
+                    "group_name": group_name,
+                    "containers": containers,
+                    "arrival_kg": arrival_kg,
+                    "week_label": week_label,
+                    "auto_day": auto_day,
+                    "current_date": current_date,
+                    "is_fixed": is_fixed
+                })
+    
+    if not orders_current_month:
+        st.warning(f"⚠️ Нет заказов с приходом в {current_month_name} {current_year}")
+        st.stop()
+    
+    # Показываем таблицу заказов
+    st.markdown(f"### 📦 Заказы {current_month_name} {current_year} ({len(orders_current_month)} шт)")
+    
+    import pandas as pd
+    
+    table_data = []
+    for order in orders_current_month:
+        week_short = ""
+        wl = order["week_label"]
+        if "пред" in wl.lower():
+            week_short = "пред мес"
+        elif "Тиж. 1" in wl:
+            week_short = "нед 1"
+        elif "Тиж. 2" in wl:
+            week_short = "нед 2"
+        elif "Тиж. 3" in wl:
+            week_short = "нед 3"
+        elif "Тиж. 4" in wl:
+            week_short = "нед 4"
+        
+        status = "🔒 Зафиксирована" if order["is_fixed"] else "🔄 Автоматическая"
+        
+        # Формат отображения контейнеров
+        if order["containers"] > 0:
+            cont_display = f"{order['containers']} конт"
+        else:
+            cont_display = "баланс"
+        
+        table_data.append({
+            "Группа": order["group_name"],
+            "Тип": cont_display,
+            "Товар": f"{order['arrival_kg']:,} кг",
+            "Неделя": week_short,
+            "Дата прихода": order["current_date"].strftime("%d.%m.%Y"),
+            "Статус": status
+        })
+    
+    df = pd.DataFrame(table_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Форма для фиксации даты
+    st.markdown("---")
+    st.markdown("### ✏️ Изменить дату прихода")
+    
+    col1, col2, col3 = st.columns([3, 2, 1])
+    
+    with col1:
+        # Выбор заказа
+        order_options = []
+        for o in orders_current_month:
+            type_str = f"{o['containers']} конт" if o['containers'] > 0 else "баланс"
+            order_options.append(f"{o['group_name']} ({type_str}, {o['current_date'].strftime('%d.%m.%Y')})")
+        
+        selected_option = st.selectbox(
+            "Выберите приход:",
+            options=order_options,
+            key="selected_order"
+        )
+        selected_idx = order_options.index(selected_option)
+        selected_order = orders_current_month[selected_idx]
+    
+    with col2:
+        # Ввод новой даты
+        current_value = selected_order["current_date"]
+        # Конвертируем datetime в date если нужно
+        if isinstance(current_value, datetime):
+            current_value = current_value.date()
+        
+        new_date = st.date_input(
+            "Новая дата прихода:",
+            value=current_value,
+            min_value=datetime(current_year, current_month, 1).date(),
+            max_value=datetime(current_year, current_month, 28).date(),
+            key="new_arrival_date"
+        )
+    
+    with col3:
+        st.write("")  # Отступ
+        st.write("")
+        if st.button("💾 Зафиксировать", type="primary", use_container_width=True):
+            # Сохраняем дату
+            st.session_state.arrival_fixed_dates[selected_order["group_name"]] = datetime.combine(new_date, datetime.min.time())
+            st.success(f"✅ Дата для '{selected_order['group_name']}' зафиксирована: {new_date.strftime('%d.%m.%Y')}")
+            st.rerun()
+    
+    # Кнопка сброса всех дат
+    st.markdown("---")
+    
+    # ОТЛАДКА: показываем что в session_state
+    with st.expander("🔍 Отладка: Зафиксированные даты"):
+        st.write("**Содержимое st.session_state.arrival_fixed_dates:**")
+        if st.session_state.arrival_fixed_dates:
+            for group_name, date in st.session_state.arrival_fixed_dates.items():
+                st.write(f"- `{group_name}`: {date.strftime('%d.%m.%Y %H:%M:%S')}")
+        else:
+            st.write("Пусто")
+    
+    if st.button("🔄 Сбросить все даты на автоматические", use_container_width=False):
+        st.session_state.arrival_fixed_dates = {}
+        st.success("✅ Все даты сброшены на автоматические")
+        st.rerun()
+
+
+elif page == "📈 Аналитика по продажам":
+    st.title("📈 Аналитика по продажам")
+    st.caption("Визуализация динамики продаж и отклонений от плана")
+    
+    st.info("🚧 **В разработке**")
+    
+    st.markdown("""
+    ### 📊 Планируемая аналитика:
+    
+    **1. Динамика продаж**
+    - График план vs факт по месяцам
+    - Выполнение плана в %
+    - Тренды по группам товаров
+    
+    **2. Отклонения от плана**
+    - Группы с недовыполнением/перевыполнением
+    - Анализ причин отклонений
+    - Критические позиции
+    
+    **3. Прогнозы**
+    - Прогноз продаж на следующий месяц
+    - Рекомендации по корректировке планов
+    - Сезонные факторы
+    
+    **4. Эффективность**
+    - Оборачиваемость по группам
+    - Динамика цен
+    - Рентабельность по позициям
+    """)
+
+
 # Футер
 st.divider()
-st.caption("Система планирования закупок на 12 месяцев | v1.0")
+st.caption("Система планирования закупок и продаж | v2.0")

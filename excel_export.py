@@ -10,13 +10,14 @@ from openpyxl.utils import get_column_letter
 from typing import Dict, List
 from datetime import datetime
 from simulation import get_plan  # Для определения плана позиции в месяце
+from data import BASE_YEAR, BASE_MONTH, N_MONTHS  # Импортируем константы
 
 
 def get_month_label(mi: int) -> str:
     """Получить название месяца по индексу"""
     months = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-    y = 2026 + (3 + mi) // 12
-    m = (3 + mi) % 12
+    y = BASE_YEAR + (BASE_MONTH - 1 + mi) // 12
+    m = (BASE_MONTH - 1 + mi) % 12
     return f"{months[m]} {y}"
 
 
@@ -92,14 +93,17 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     # Заголовок (строка 1)
     ws.merge_cells('A1:AY1')  # Покрываем все колонки (3 + 12*4 = 51 = AY)
     cell = ws['A1']
-    today = datetime.now().strftime("%d %B %Y").replace("January", "січня").replace("February", "лютого").replace("March", "березня").replace("April", "квітня")
-    cell.value = f"План поставок + Балансування  |  Буфер моделі: г.4=1.2, решта=1.0  |  Мішок: 25 кг  |  квіт 2026 — бер 2027  |  {today}"
+    today = datetime.now().strftime("%d %B %Y").replace("January", "січня").replace("February", "лютого").replace("March", "березня").replace("April", "квітня").replace("May", "травня").replace("June", "червня").replace("July", "липня").replace("August", "серпня").replace("September", "вересня").replace("October", "жовтня").replace("November", "листопада").replace("December", "грудня")
+    # Автоматический диапазон дат
+    start_month = get_month_label(0)  # Первый месяц
+    end_month = get_month_label(N_MONTHS - 1)  # Последний месяц
+    cell.value = f"План поставок + Балансування  |  Буфер моделі: г.4=1.2, решта=1.0  |  Мішок: 25 кг  |  {start_month} — {end_month}  |  {today}"
     cell.font = Font(name='Arial', bold=True, size=11, color='000000')
     cell.alignment = Alignment(horizontal='center', vertical='center')
     
     # СТРОКА 2 - ЗАГОЛОВКИ МЕСЯЦЕВ (начинаются с колонки 4)
     col = 4  # Месяцы начинаются с D (колонка 4)
-    for mi in range(12):
+    for mi in range(N_MONTHS):
         month_label = get_month_label(mi)
         
         # Объединяем 4 колонки для названия месяца
@@ -132,9 +136,9 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     cell.border = bd
     ws.column_dimensions['A'].width = 38
     
-    # Колонка B - "План (кг/мес)"
+    # Колонка B - "план закупок кг/мес"
     cell = ws[f'B{subheader_row}']
-    cell.value = "План\n(кг/мес)"
+    cell.value = "план закупок\nкг/мес"
     cell.font = Font(name='Arial', bold=True, size=9, color='000000')
     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     cell.border = bd
@@ -152,7 +156,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     col = 4
     headers = ["Ост.нач\n(кг)", "Срок реал.\nнач (мес)", "Приход\n(кг)", "Заказ\n→ приход"]
     
-    for mi in range(12):
+    for mi in range(N_MONTHS):
         for i, h in enumerate(headers):
             c = ws.cell(row=subheader_row, column=col + i)
             c.value = h
@@ -228,7 +232,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
         
         # Данные группы по месяцам (начинаются с колонки 4)
         col = 4
-        for mi in range(12):
+        for mi in range(N_MONTHS):
             r = group_results[mi]
             
             if is_active:
@@ -398,7 +402,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
             
             # Данные позиции по месяцам (начинаются с колонки 4)
             col = 4
-            for mi in range(12):
+            for mi in range(N_MONTHS):
                 r = group_results[mi]
                 
                 # 1. Остаток позиции на начало (с цветом буфера)
@@ -520,7 +524,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     ws_calendar.column_dimensions['A'].width = 35
     
     # Месяцы (колонки B-M)
-    for mi in range(12):
+    for mi in range(N_MONTHS):
         col_letter = get_column_letter(2 + mi)  # B=2, C=3, etc.
         month_label = get_month_label(mi)
         cell = ws_calendar[f'{col_letter}3']
@@ -545,7 +549,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
         cell.alignment = Alignment(horizontal='left', vertical='center')
         
         # Колонки B-M - месяцы прибытия
-        for mi in range(12):
+        for mi in range(N_MONTHS):
             r = group_results[mi]
             cell = ws_calendar.cell(row=data_row, column=2 + mi)
             
@@ -670,7 +674,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     ws_arrivals.column_dimensions['A'].width = 35
     
     # Месяцы (колонки B-M)
-    for mi in range(12):
+    for mi in range(N_MONTHS):
         col_letter = get_column_letter(2 + mi)
         month_label = get_month_label(mi)
         cell = ws_arrivals[f'{col_letter}3']
@@ -692,7 +696,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     
     # Данные по группам
     data_row = 4
-    month_totals = {mi: 0 for mi in range(12)}
+    month_totals = {mi: 0 for mi in range(N_MONTHS)}
     grand_total_arrivals = 0
     
     for group in groups:
@@ -709,7 +713,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
         row_total = 0
         
         # Колонки B-M - количество контейнеров
-        for mi in range(12):
+        for mi in range(N_MONTHS):
             r = group_results[mi]
             cell = ws_arrivals.cell(row=data_row, column=2 + mi)
             
@@ -761,7 +765,7 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     cell.alignment = Alignment(horizontal='center', vertical='center')
     cell.border = bd
     
-    for mi in range(12):
+    for mi in range(N_MONTHS):
         cell = ws_arrivals.cell(row=data_row, column=2 + mi)
         if month_totals[mi] > 0:
             cell.value = month_totals[mi]

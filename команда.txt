@@ -10,7 +10,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "Описание изменений"
+git commit -m "c 18 на 12"
 git push
 
 [passwords]

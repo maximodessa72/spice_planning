@@ -12,11 +12,12 @@ PDG_SEASONAL = {0: 3200, 1: 3200, 2: 3200, 3: 3200, 4: 3200, 5: 4500, 6: 7000, 7
 BUFFER_DEFAULT = 1.0
 BUFFER_GROUP4 = 1.2
 BAG = 25
-N_MONTHS = 18
+N_MONTHS = 12  # Планирование на 12 месяцев вперёд
 
-# Базовая дата (когда система начала работать)
-BASE_YEAR = 2026
-BASE_MONTH = 4  # Апрель
+# АВТООПРЕДЕЛЕНИЕ текущего месяца (для закупок)
+_current_date = datetime.now()
+BASE_YEAR = _current_date.year
+BASE_MONTH = _current_date.month  # Текущий месяц (май)
 
 def get_current_start_month():
     """
@@ -99,7 +100,7 @@ GROUPS = [
         "container": 27000,
         "in_transit": {4: 27000},
         "items": [
-            {"name": "Морква (3х3)", "balance": 37617, "plan": 6000, "in_transit": {4: 27000}, "plan_override": {1: 21000}},
+            {"name": "Морква (3х3)", "balance": 37617, "plan": 6000, "in_transit": {4: 27000}},
         ]
     },
     {
