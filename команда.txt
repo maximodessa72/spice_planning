@@ -14,7 +14,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "фиксация дат"
+git commit -m "импорт данных и аналитика"
 git push
 
 [passwords]
