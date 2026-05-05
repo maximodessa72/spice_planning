@@ -1104,8 +1104,8 @@ elif page == "✅ Подтверждение заказов":
                     st.write("**Комплектация:**")
                     st.text(order["Комплектация"])
                     
-                    # Три колонки для кнопок
-                    col1, col2, col3 = st.columns(3)
+                    # Четыре колонки для кнопок
+                    col1, col2, col3, col4 = st.columns(4)
                     
                     with col1:
                         # Кнопка скачать спецификацию
@@ -1160,9 +1160,10 @@ elif page == "✅ Подтверждение заказов":
                         # Кнопки смещения заказа
                         st.caption("Сместить заказ:")
                         
-                        # Проверяем можно ли сместить назад
-                        from data import CURRENT_START_MONTH
+                        # Проверяем можно ли сместить назад/вперёд
+                        from data import CURRENT_START_MONTH, N_MONTHS
                         can_move_back = order["_mi"] > CURRENT_START_MONTH
+                        can_move_forward = order["_mi"] < (N_MONTHS - 1)
                         
                         # Кнопка сместить назад
                         if st.button("⬅️ На месяц назад", 
@@ -1175,12 +1176,19 @@ elif page == "✅ Подтверждение заказов":
                             new_mi = old_mi - 1
                             
                             # Переносим данные группы
-                            order["_group"]["in_transit"][new_mi] = order["_group"]["in_transit"].pop(old_mi)
+                            group_weight = order["_group"]["in_transit"].pop(old_mi)
+                            order["_group"]["in_transit"][new_mi] = group_weight
                             
                             # Переносим данные позиций
                             for item in order["_group"]["items"]:
                                 if old_mi in item.get("in_transit", {}):
-                                    item["in_transit"][new_mi] = item["in_transit"].pop(old_mi)
+                                    item_weight = item["in_transit"].pop(old_mi)
+                                    item["in_transit"][new_mi] = item_weight
+                            
+                            # Переносим номер недели если есть
+                            if "week_arrival" in order["_group"] and old_mi in order["_group"]["week_arrival"]:
+                                week_num = order["_group"]["week_arrival"].pop(old_mi)
+                                order["_group"]["week_arrival"][new_mi] = week_num
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
@@ -1192,19 +1200,27 @@ elif page == "✅ Подтверждение заказов":
                         # Кнопка сместить вперёд
                         if st.button("➡️ На месяц вперёд", 
                                     key=f"move_forward_{idx}",
+                                    disabled=not can_move_forward,
                                     use_container_width=True,
-                                    help="Переместить на следующий месяц"):
+                                    help="Переместить на следующий месяц" if can_move_forward else "Достигнут конец горизонта планирования"):
                             # Смещаем на месяц вперёд
                             old_mi = order["_mi"]
                             new_mi = old_mi + 1
                             
                             # Переносим данные группы
-                            order["_group"]["in_transit"][new_mi] = order["_group"]["in_transit"].pop(old_mi)
+                            group_weight = order["_group"]["in_transit"].pop(old_mi)
+                            order["_group"]["in_transit"][new_mi] = group_weight
                             
                             # Переносим данные позиций
                             for item in order["_group"]["items"]:
                                 if old_mi in item.get("in_transit", {}):
-                                    item["in_transit"][new_mi] = item["in_transit"].pop(old_mi)
+                                    item_weight = item["in_transit"].pop(old_mi)
+                                    item["in_transit"][new_mi] = item_weight
+                            
+                            # Переносим номер недели если есть
+                            if "week_arrival" in order["_group"] and old_mi in order["_group"]["week_arrival"]:
+                                week_num = order["_group"]["week_arrival"].pop(old_mi)
+                                order["_group"]["week_arrival"][new_mi] = week_num
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
@@ -1214,25 +1230,179 @@ elif page == "✅ Подтверждение заказов":
                             st.rerun()
                     
                     with col3:
-                        # Кнопка отменить подтверждение
+                        # Кнопка редактирования заказа
+                        st.caption("Управление:")
+                        if st.button("✏️ Редактировать", key=f"edit_{idx}", use_container_width=True):
+                            # Сохраняем только имя группы и mi
+                            st.session_state.editing_order = {
+                                "group_name": order["Группа"],
+                                "mi": order["_mi"],
+                                "month_label": order["Месяц прихода"],
+                                "week": order["_week"]
+                            }
+                            st.rerun()
+                    
+                    with col4:
+                        # Кнопка удаления заказа
                         st.caption(" ")  # Выравнивание
-                        if st.button("🗑️ Отменить подтверждение", key=f"unfix_{idx}", type="secondary", use_container_width=True):
-                            # Удаляем подтверждение
+                        if st.button("🗑️ Удалить заказ", key=f"delete_{idx}", type="secondary", use_container_width=True):
+                            # Полное удаление заказа из всех расчётов
                             if order["_mi"] in order["_group"]["in_transit"]:
                                 del order["_group"]["in_transit"][order["_mi"]]
                             
+                            # Удаляем из позиций
                             for item in order["_group"]["items"]:
                                 if order["_mi"] in item.get("in_transit", {}):
                                     del item["in_transit"][order["_mi"]]
+                            
+                            # Удаляем номер недели если есть
+                            if "week_arrival" in order["_group"] and order["_mi"] in order["_group"]["week_arrival"]:
+                                del order["_group"]["week_arrival"][order["_mi"]]
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
                             st.session_state.need_recalc = False
                             
-                            st.success("✅ Подтверждение отменено!")
+                            st.success("✅ Заказ полностью удалён!")
                             st.rerun()
         else:
             st.info("ℹ️ Нет подтверждённых заказов")
+        
+    # МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ (ВСЕГДА ДОСТУПНО)
+    if "editing_order" in st.session_state:
+        st.divider()
+        st.subheader(f"✏️ Редактирование заказа: {st.session_state.editing_order['group_name']}")
+        st.caption(f"Месяц прихода: {st.session_state.editing_order['month_label']}")
+        
+        # Находим группу в st.session_state.groups
+        group_name = st.session_state.editing_order["group_name"]
+        editing_mi = st.session_state.editing_order["mi"]
+        
+        editing_group = None
+        for g in st.session_state.groups:
+            if g["name"] == group_name:
+                editing_group = g
+                break
+        
+        if not editing_group:
+            st.error("❌ Группа не найдена")
+            del st.session_state.editing_order
+            st.rerun()
+        
+        st.write("**Текущая комплектация:**")
+        
+        # Создаём форму редактирования
+        with st.form(key="edit_order_form"):
+            edited_items = []
+            total_edited_weight = 0
+            
+            for item in editing_group["items"]:
+                current_weight = item.get("in_transit", {}).get(editing_mi, 0)
+                
+                col_name, col_weight = st.columns([3, 1])
+                
+                with col_name:
+                    st.write(f"**{item['name']}**")
+                
+                with col_weight:
+                    new_weight = st.number_input(
+                        "кг",
+                        min_value=0,
+                        value=int(current_weight),
+                        step=100,
+                        key=f"edit_item_{item['name']}",
+                        label_visibility="collapsed"
+                    )
+                
+                edited_items.append({
+                    "item": item,
+                    "new_weight": new_weight
+                })
+                total_edited_weight += new_weight
+            
+            st.divider()
+            st.metric("Общий вес после изменений", f"{total_edited_weight:,} кг")
+            
+            # Редактирование номера недели
+            current_week = st.session_state.editing_order.get("week")
+            new_week = st.number_input(
+                "Номер недели прихода (опционально)",
+                min_value=0,
+                max_value=4,
+                value=current_week if current_week else 0,
+                help="0 = не указано, 1-4 = номер недели месяца"
+            )
+            
+            col_save, col_cancel = st.columns(2)
+            
+            with col_save:
+                submit = st.form_submit_button("💾 Сохранить изменения", type="primary", use_container_width=True)
+            
+            with col_cancel:
+                cancel = st.form_submit_button("❌ Отменить", use_container_width=True)
+            
+            if submit:
+                # Находим группу в st.session_state.groups по имени
+                group_name = st.session_state.editing_order["group_name"]
+                target_group = None
+                for g in st.session_state.groups:
+                    if g["name"] == group_name:
+                        target_group = g
+                        break
+                
+                if target_group:
+                    # Применяем изменения к найденной группе
+                    target_group["in_transit"][editing_mi] = total_edited_weight
+                    
+                    for edited in edited_items:
+                        # Находим соответствующую позицию в группе
+                        for item in target_group["items"]:
+                            if item["name"] == edited["item"]["name"]:
+                                if edited["new_weight"] > 0:
+                                    if "in_transit" not in item:
+                                        item["in_transit"] = {}
+                                    item["in_transit"][editing_mi] = edited["new_weight"]
+                                else:
+                                    # Удаляем позицию если вес = 0
+                                    if "in_transit" in item and editing_mi in item["in_transit"]:
+                                        del item["in_transit"][editing_mi]
+                                break
+                    
+                    # Сохраняем номер недели
+                    if new_week > 0:
+                        if "week_arrival" not in target_group:
+                            target_group["week_arrival"] = {}
+                        target_group["week_arrival"][editing_mi] = new_week
+                    else:
+                        # Удаляем номер недели если 0
+                        if "week_arrival" in target_group and editing_mi in target_group["week_arrival"]:
+                            del target_group["week_arrival"][editing_mi]
+                    
+                    # Если общий вес = 0, удаляем весь заказ
+                    if total_edited_weight == 0:
+                        if editing_mi in target_group["in_transit"]:
+                            del target_group["in_transit"][editing_mi]
+                        if "week_arrival" in target_group and editing_mi in target_group["week_arrival"]:
+                            del target_group["week_arrival"][editing_mi]
+                    
+                    # Пересчёт
+                    st.session_state.results = run_all_simulations(st.session_state.groups)
+                    st.session_state.need_recalc = False
+                    
+                    # Закрываем форму редактирования
+                    del st.session_state.editing_order
+                    
+                    st.success("✅ Заказ обновлён!")
+                    st.rerun()
+                else:
+                    st.error("❌ Ошибка: группа не найдена")
+                    del st.session_state.editing_order
+                    st.rerun()
+            
+            if cancel:
+                # Закрываем форму без изменений
+                del st.session_state.editing_order
+                st.rerun()
 
 
 
