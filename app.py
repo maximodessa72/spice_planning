@@ -554,265 +554,257 @@ elif page == "📥 Импорт данных по закупкам":
     st.title("📥 Импорт данных по закупкам")
     st.info("Обновление остатков и планов закупок")
     
+    # Проверка прав доступа
+    user_role = st.session_state.get("user_role", "viewer")
+    if user_role != "admin":
+        st.warning("⚠️ Импорт данных доступен только администраторам")
+        st.stop()
+    
     st.markdown("""
-    ### 📋 Процесс обновления:
-    - **Шаг 1:** Импорт остатков из учётной программы
-    - **Шаг 2:** Обновление планов закупок через Excel
+    ### 📋 Два типа импорта:
+    - **Остатки:** Импорт текущих остатков из учётной программы
+    - **Планы закупок:** Обновление планов закупок через Excel
     """)
     
-    st.divider()
+    # Вкладки для разных типов импорта
+    tab1, tab2 = st.tabs([
+        "📦 Остатки из программы",
+        "📊 Планы закупок"
+    ])
     
     # ========================================================================
-    # ШАГ 1: ИМПОРТ ОСТАТКОВ
+    # ВКЛАДКА 1: ИМПОРТ ОСТАТКОВ
     # ========================================================================
-    st.header("Шаг 1: Импорт остатков из программы")
-    st.caption("Загрузите файл с остатками из вашей учётной системы")
-    
-    uploaded_stocks = st.file_uploader(
-        "Выберите файл Excel с остатками",
-        type=['xlsx', 'xls'],
-        key='stocks_upload',
-        help="Файл должен содержать колонки с названиями позиций и остатками"
-    )
-    
-    if uploaded_stocks is not None:
-        try:
-            # Читаем файл
-            df_raw = pd.read_excel(uploaded_stocks, header=None)
-            
-            # Ищем строку с "Остаток" и "кг"
-            data_start = None
-            for idx, row in df_raw.iterrows():
-                if pd.notna(row[2]) and 'Остаток' in str(row[2]):
-                    data_start = idx + 1
-                    break
-            
-            if data_start:
-                # Извлекаем чистые данные
-                stocks_data = []
-                for idx in range(data_start, len(df_raw)):
-                    name = df_raw.iloc[idx, 1]
-                    value = df_raw.iloc[idx, 2]
-                    
-                    if pd.notna(name) and pd.notna(value) and name != 'Итог':
-                        stocks_data.append({
-                            'Позиция': str(name).strip(),
-                            'Остаток': float(value)
-                        })
-                
-                if stocks_data:
-                    df_stocks = pd.DataFrame(stocks_data)
-                    
-                    st.success(f"✅ Файл прочитан: {len(df_stocks)} позиций")
-                    
-                    # Сопоставление с позициями проекта
-                    st.subheader("Сопоставление с позициями проекта")
-                    
-                    matches = []
-                    not_found_in_file = []
-                    not_found_in_project = []
-                    
-                    # Создаём словарь для быстрого поиска
-                    stocks_dict = {row['Позиция']: row['Остаток'] for _, row in df_stocks.iterrows()}
-                    project_positions = set()
-                    
-                    for group in st.session_state.groups:
-                        for item in group['items']:
-                            project_positions.add(item['name'])
-                            
-                            if item['name'] in stocks_dict:
-                                old_balance = item['balance']
-                                new_balance = stocks_dict[item['name']]
-                                
-                                if old_balance != new_balance:
-                                    matches.append({
-                                        'Группа': group['name'],
-                                        'Позиция': item['name'],
-                                        'Было': f"{old_balance:,.0f}",
-                                        'Станет': f"{new_balance:,.0f}",
-                                        'Изменение': f"{new_balance - old_balance:+,.0f}"
-                                    })
-                            else:
-                                not_found_in_file.append({
-                                    'Группа': group['name'],
-                                    'Позиция': item['name']
-                                })
-                    
-                    # Позиции из файла, которых нет в проекте
-                    for position in stocks_dict.keys():
-                        if position not in project_positions:
-                            not_found_in_project.append({
-                                'Позиция': position,
-                                'Остаток': f"{stocks_dict[position]:,.0f}"
-                            })
-                    
-                    # Статистика
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Найдено совпадений", len(matches))
-                    with col2:
-                        st.metric("Не найдено в файле", len(not_found_in_file))
-                    with col3:
-                        st.metric("Не найдено в проекте", len(not_found_in_project))
-                    
-                    # Показываем изменения
-                    if matches:
-                        st.subheader("Изменения остатков")
-                        matches_df = pd.DataFrame(matches)
-                        st.dataframe(matches_df, use_container_width=True, hide_index=True)
-                        
-                        # Кнопка применить
-                        st.divider()
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.warning("⚠️ Это действие обновит остатки и запустит пересчёт")
-                        with col2:
-                            if st.button("✅ Применить остатки", type="primary", use_container_width=True, key='apply_stocks'):
-                                # Применяем изменения
-                                for group in st.session_state.groups:
-                                    for item in group['items']:
-                                        if item['name'] in stocks_dict:
-                                            item['balance'] = int(stocks_dict[item['name']])
-                                
-                                # Пересчёт
-                                st.session_state.results = run_all_simulations(st.session_state.groups)
-                                st.session_state.need_recalc = False
-                                
-                                st.success("✅ Остатки обновлены и пересчитаны!")
-                                st.balloons()
-                                st.rerun()
-                    else:
-                        st.info("ℹ️ Изменений остатков не обнаружено")
-                    
-                    # Предупреждения
-                    if not_found_in_file:
-                        with st.expander(f"⚠️ Не найдено в файле ({len(not_found_in_file)} позиций)"):
-                            st.dataframe(pd.DataFrame(not_found_in_file), use_container_width=True, hide_index=True)
-                    
-                    if not_found_in_project:
-                        with st.expander(f"⚠️ Не найдено в проекте ({len(not_found_in_project)} позиций)"):
-                            st.dataframe(pd.DataFrame(not_found_in_project), use_container_width=True, hide_index=True)
-                
-                else:
-                    st.error("❌ Не удалось извлечь данные из файла")
-            else:
-                st.error("❌ Не найдена строка с заголовком 'Остаток'. Проверьте формат файла.")
+    with tab1:
+        st.subheader("📦 Импорт остатков из программы")
+        st.caption("Загрузите файл с остатками из вашей учётной системы")
         
-        except Exception as e:
-            st.error(f"❌ Ошибка при чтении файла: {e}")
-    
-    st.divider()
-    
-    # ========================================================================
-    # ШАГ 2: ОБНОВЛЕНИЕ ПЛАНОВ
-    # ========================================================================
-    st.header("Шаг 2: Обновление планов закупок")
-    st.caption("Скачайте шаблон, обновите планы в Excel, загрузите обратно")
-    
-    # Кнопка скачать шаблон
-    if st.button("📥 Скачать шаблон для планов", type="primary"):
-        import io
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-        
-        # Создаём Excel
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Обновление планов"
-        
-        # Заголовки
-        headers = ["Группа", "Позиция", "План (текущий)", "План (новый)", "Сезонная"]
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col)
-            cell.value = header
-            cell.font = Font(bold=True, size=11, color='FFFFFF')
-            cell.fill = PatternFill(start_color='1F4E79', end_color='1F4E79', fill_type='solid')
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-        
-        # Ширина колонок
-        ws.column_dimensions['A'].width = 30
-        ws.column_dimensions['B'].width = 30
-        ws.column_dimensions['C'].width = 18
-        ws.column_dimensions['D'].width = 18
-        ws.column_dimensions['E'].width = 12
-        
-        # Данные
-        row = 2
-        for group in st.session_state.groups:
-            for item in group["items"]:
-                ws.cell(row=row, column=1, value=group["name"])
-                ws.cell(row=row, column=2, value=item["name"])
-                ws.cell(row=row, column=3, value=item["plan"])
-                ws.cell(row=row, column=4, value=item["plan"])  # Заполнено текущим
-                ws.cell(row=row, column=5, value="Да" if item.get("seasonal") else "Нет")
-                
-                # Если сезонная - выделяем жёлтым и защищаем
-                if item.get("seasonal"):
-                    for col in range(1, 6):
-                        ws.cell(row=row, column=col).fill = PatternFill(
-                            start_color='FFF9C4', end_color='FFF9C4', fill_type='solid'
-                        )
-                
-                row += 1
-        
-        # Сохраняем в буфер
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        
-        st.download_button(
-            label="💾 Скачать шаблон планов",
-            data=buffer,
-            file_name=f"обновление_планов_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        uploaded_stocks = st.file_uploader(
+            "Выберите файл Excel с остатками",
+            type=['xlsx', 'xls'],
+            key='stocks_upload',
+            help="Файл должен содержать колонки с названиями позиций и остатками"
         )
         
-        st.success("✅ Шаблон готов к скачиванию!")
-        st.info("💡 **Инструкция:** Обновите колонку 'План (новый)'. Для сезонных позиций (жёлтые) план НЕ обновляется.")
-    
-    st.divider()
-    
-    # Загрузка планов
-    st.subheader("Загрузить обновлённые планы")
-    
-    uploaded_plans = st.file_uploader(
-        "Выберите файл Excel с обновлёнными планами",
-        type=['xlsx'],
-        key='plans_upload',
-        help="Загрузите файл, который вы скачали и обновили выше"
-    )
-    
-    if uploaded_plans is not None:
-        try:
-            # Читаем файл
-            df_plans = pd.read_excel(uploaded_plans)
-            
-            # Валидация
-            required_cols = ["Группа", "Позиция", "План (новый)"]
-            if not all(col in df_plans.columns for col in required_cols):
-                st.error("❌ Неправильный формат файла! Используйте шаблон выше.")
-            else:
-                st.success(f"✅ Файл загружен: {len(df_plans)} позиций")
+        if uploaded_stocks is not None:
+            try:
+                # Читаем файл
+                df_raw = pd.read_excel(uploaded_stocks, header=None)
                 
-                # Собираем изменения
-                plan_changes = []
-                for idx, row in df_plans.iterrows():
-                    old_plan = row.get("План (текущий)", 0)
-                    new_plan = row.get("План (новый)", 0)
-                    is_seasonal = row.get("Сезонная", "Нет") == "Да"
+                # Ищем строку с "Остаток" и "кг"
+                data_start = None
+                for idx, row in df_raw.iterrows():
+                    if pd.notna(row[2]) and 'Остаток' in str(row[2]):
+                        data_start = idx + 1
+                        break
+                
+                if data_start:
+                    # Извлекаем чистые данные
+                    stocks_data = []
+                    for idx in range(data_start, len(df_raw)):
+                        name = df_raw.iloc[idx, 1]
+                        value = df_raw.iloc[idx, 2]
+                        
+                        if pd.notna(name) and pd.notna(value) and name != 'Итог':
+                            stocks_data.append({
+                                'Позиция': str(name).strip(),
+                                'Остаток': float(value)
+                            })
                     
-                    if not is_seasonal and old_plan != new_plan:
-                        plan_changes.append({
-                            "Группа": row["Группа"],
-                            "Позиция": row["Позиция"],
-                            "Было": f"{old_plan:,.0f}",
-                            "Станет": f"{new_plan:,.0f}",
-                            "Изменение": f"{new_plan - old_plan:+,.0f}"
+                    if stocks_data:
+                        df_stocks = pd.DataFrame(stocks_data)
+                        
+                        st.success(f"✅ Файл прочитан: {len(df_stocks)} позиций")
+                        
+                        # Сопоставление с позициями проекта
+                        st.subheader("Сопоставление с позициями проекта")
+                        
+                        matches = []
+                        not_found_in_file = []
+                        not_found_in_project = []
+                        
+                        # Создаём словарь для быстрого поиска
+                        stocks_dict = {row['Позиция']: row['Остаток'] for _, row in df_stocks.iterrows()}
+                        project_positions = set()
+                        
+                        for group in st.session_state.groups:
+                            for item in group['items']:
+                                project_positions.add(item['name'])
+                                
+                                if item['name'] in stocks_dict:
+                                    old_balance = item['balance']
+                                    new_balance = stocks_dict[item['name']]
+                                    
+                                    if old_balance != new_balance:
+                                        matches.append({
+                                            'Группа': group['name'],
+                                            'Позиция': item['name'],
+                                            'Было': f"{old_balance:,.0f}",
+                                            'Станет': f"{new_balance:,.0f}",
+                                            'Изменение': f"{new_balance - old_balance:+,.0f}"
+                                        })
+                                else:
+                                    not_found_in_file.append({
+                                        'Группа': group['name'],
+                                        'Позиция': item['name']
+                                    })
+                        
+                        # Позиции из файла, которых нет в проекте
+                        for position in stocks_dict.keys():
+                            if position not in project_positions:
+                                not_found_in_project.append({
+                                    'Позиция': position,
+                                    'Остаток': f"{stocks_dict[position]:,.0f}"
+                                })
+                        
+                        # Статистика
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Найдено совпадений", len(matches))
+                        with col2:
+                            st.metric("Не найдено в файле", len(not_found_in_file))
+                        with col3:
+                            st.metric("Не найдено в проекте", len(not_found_in_project))
+                        
+                        # Показываем изменения
+                        if matches:
+                            st.subheader("Изменения остатков")
+                            matches_df = pd.DataFrame(matches)
+                            st.dataframe(matches_df, use_container_width=True, hide_index=True)
+                            
+                            # Кнопка применить
+                            st.divider()
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.warning("⚠️ Это действие обновит остатки и запустит пересчёт")
+                            with col2:
+                                if st.button("✅ Применить остатки", type="primary", use_container_width=True, key='apply_stocks'):
+                                    # Применяем изменения
+                                    for group in st.session_state.groups:
+                                        for item in group['items']:
+                                            if item['name'] in stocks_dict:
+                                                item['balance'] = int(stocks_dict[item['name']])
+                                    
+                                    # Пересчёт
+                                    st.session_state.results = run_all_simulations(st.session_state.groups)
+                                    st.session_state.need_recalc = False
+                                    
+                                    st.success("✅ Остатки обновлены и пересчитаны!")
+                                    st.balloons()
+                                    st.rerun()
+                        else:
+                            st.info("ℹ️ Изменений остатков не обнаружено")
+                        
+                        # Предупреждения
+                        if not_found_in_file:
+                            with st.expander(f"⚠️ Не найдено в файле ({len(not_found_in_file)} позиций)"):
+                                st.dataframe(pd.DataFrame(not_found_in_file), use_container_width=True, hide_index=True)
+                        
+                        if not_found_in_project:
+                            with st.expander(f"⚠️ Не найдено в проекте ({len(not_found_in_project)} позиций)"):
+                                st.dataframe(pd.DataFrame(not_found_in_project), use_container_width=True, hide_index=True)
+                    
+                    else:
+                        st.error("❌ Не удалось извлечь данные из файла")
+                else:
+                    st.error("❌ Не найдена строка с заголовком 'Остаток'. Проверьте формат файла.")
+            
+            except Exception as e:
+                st.error(f"❌ Ошибка при чтении файла: {e}")
+    
+    # ========================================================================
+    # ВКЛАДКА 2: ОБНОВЛЕНИЕ ПЛАНОВ ЗАКУПОК
+    # ========================================================================
+    with tab2:
+        st.subheader("📊 Обновление планов закупок")
+        st.caption("Загрузите файл с обновлёнными планами в формате: Название позиции - Количество")
+        
+        st.markdown("""
+        **Формат файла:**
+        - Колонка 1: Название позиции
+        - Колонка 2: План закупок (кг)
+        - Строки с заголовками групп имеют пустое значение во второй колонке
+        """)
+        
+        uploaded_plans = st.file_uploader(
+            "Выберите файл Excel с планами закупок",
+            type=['xlsx', 'xls'],
+            key='plans_upload',
+            help="Загрузите файл с обновлёнными планами"
+        )
+        
+        if uploaded_plans is not None:
+            try:
+                # Читаем файл
+                df_raw = pd.read_excel(uploaded_plans, header=None)
+                
+                st.success(f"✅ Файл загружен: {len(df_raw)} строк")
+                
+                # Парсим данные
+                plan_changes = []
+                not_found_positions = []
+                
+                for idx, row in df_raw.iterrows():
+                    # Пропускаем заголовки и пустые строки
+                    if idx == 0 or pd.isna(row[0]) or pd.isna(row[1]):
+                        continue
+                    
+                    position_name = str(row[0]).strip()
+                    new_plan = row[1]
+                    
+                    # Пропускаем строки с заголовками групп (NaN во второй колонке)
+                    if pd.isna(new_plan):
+                        continue
+                    
+                    new_plan = float(new_plan)
+                    
+                    # Ищем позицию в группах
+                    found = False
+                    for group in st.session_state.groups:
+                        for item in group['items']:
+                            if item['name'] == position_name:
+                                found = True
+                                old_plan = item['plan']
+                                
+                                # Проверяем что позиция не сезонная
+                                is_seasonal = item.get('seasonal', False)
+                                
+                                if not is_seasonal and old_plan != new_plan:
+                                    plan_changes.append({
+                                        'Группа': group['name'],
+                                        'Позиция': position_name,
+                                        'Было': f"{old_plan:,.0f}",
+                                        'Станет': f"{new_plan:,.0f}",
+                                        'Изменение': f"{new_plan - old_plan:+,.0f}"
+                                    })
+                                elif is_seasonal:
+                                    plan_changes.append({
+                                        'Группа': group['name'],
+                                        'Позиция': position_name + " (сезонная)",
+                                        'Было': f"{old_plan:,.0f}",
+                                        'Станет': "не меняется",
+                                        'Изменение': "—"
+                                    })
+                                break
+                        if found:
+                            break
+                    
+                    if not found:
+                        not_found_positions.append({
+                            'Позиция': position_name,
+                            'План': f"{new_plan:,.0f}"
                         })
                 
+                # Статистика
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Найдено изменений", len([c for c in plan_changes if c['Станет'] != "не меняется"]))
+                with col2:
+                    st.metric("Не найдено в проекте", len(not_found_positions))
+                
+                # Показываем изменения
                 if plan_changes:
                     st.subheader("Изменения планов")
-                    st.write(f"**Найдено изменений:** {len(plan_changes)}")
                     changes_df = pd.DataFrame(plan_changes)
                     st.dataframe(changes_df, use_container_width=True, hide_index=True)
                     
@@ -824,19 +816,19 @@ elif page == "📥 Импорт данных по закупкам":
                     with col2:
                         if st.button("✅ Применить планы", type="primary", use_container_width=True, key='apply_plans'):
                             # Применяем изменения
-                            for idx, row in df_plans.iterrows():
-                                group_name = row["Группа"]
-                                item_name = row["Позиция"]
-                                new_plan = row.get("План (новый)", 0)
-                                is_seasonal = row.get("Сезонная", "Нет") == "Да"
+                            for idx, row in df_raw.iterrows():
+                                if idx == 0 or pd.isna(row[0]) or pd.isna(row[1]):
+                                    continue
                                 
-                                # Находим позицию
+                                position_name = str(row[0]).strip()
+                                new_plan = float(row[1])
+                                
+                                # Находим и обновляем позицию
                                 for group in st.session_state.groups:
-                                    if group["name"] == group_name:
-                                        for item in group["items"]:
-                                            if item["name"] == item_name and not is_seasonal:
-                                                item["plan"] = int(new_plan)
-                                                break
+                                    for item in group['items']:
+                                        if item['name'] == position_name and not item.get('seasonal', False):
+                                            item['plan'] = int(new_plan)
+                                            break
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
@@ -847,9 +839,16 @@ elif page == "📥 Импорт данных по закупкам":
                             st.rerun()
                 else:
                     st.info("ℹ️ Изменений планов не обнаружено")
-        
-        except Exception as e:
-            st.error(f"❌ Ошибка при чтении файла: {e}")
+                
+                # Предупреждения
+                if not_found_positions:
+                    with st.expander(f"⚠️ Не найдено в проекте ({len(not_found_positions)} позиций)"):
+                        st.dataframe(pd.DataFrame(not_found_positions), use_container_width=True, hide_index=True)
+            
+            except Exception as e:
+                st.error(f"❌ Ошибка при чтении файла: {e}")
+                import traceback
+                st.code(traceback.format_exc())
 
 
 
@@ -1707,13 +1706,28 @@ elif page == "📈 Аналитика по закупкам":
                 "Хорошо (≥ 2 мес)": sum(1 for b in buffer_stats if b["Мин. буфер"] >= 2.0)
             }
             
+            # Собираем списки групп для каждого уровня
+            level_groups = {
+                "Критично (< 1 мес)": [b["Группа"] for b in buffer_stats if b["Мин. буфер"] < 1.0],
+                "Нормально (1-2 мес)": [b["Группа"] for b in buffer_stats if 1.0 <= b["Мин. буфер"] < 2.0],
+                "Хорошо (≥ 2 мес)": [b["Группа"] for b in buffer_stats if b["Мин. буфер"] >= 2.0]
+            }
+            
+            # Формируем customdata с списками групп
+            customdata = []
+            for label in level_counts.keys():
+                groups_list = level_groups[label]
+                groups_text = "<br>".join([f"• {g}" for g in groups_list])
+                customdata.append(groups_text)
+            
             fig = go.Figure(data=[go.Pie(
                 labels=list(level_counts.keys()),
                 values=list(level_counts.values()),
                 marker=dict(colors=['#ff4444', '#ffaa44', '#44aa44']),
                 textinfo='label+value',
                 textfont=dict(size=14),
-                hovertemplate='<b>%{label}</b><br>Групп: %{value}<br>Доля: %{percent}<extra></extra>'
+                customdata=customdata,
+                hovertemplate='<b>%{label}</b><br>Групп: %{value}<br>Доля: %{percent}<br><br>Группы:<br>%{customdata}<extra></extra>'
             )])
             
             fig.update_layout(
@@ -2412,10 +2426,11 @@ elif page == "📥 Импорт данных по продажам":
                     tmp.write(uploaded_prices.getvalue())
                     tmp_path = tmp.name
                 
-                # Импортируем цены
+                # Импортируем цены (НЕ сохраняем в session_state сразу)
                 with st.spinner('Загрузка цен...'):
                     prices = import_prices_from_excel(tmp_path)
-                    st.session_state.sales_prices = prices
+                    # Временно сохраняем для предпросмотра
+                    st.session_state.temp_prices = prices
                 
                 # Удаляем временный файл
                 try:
@@ -2427,7 +2442,7 @@ elif page == "📥 Импорт данных по продажам":
                 total_items = sum(len(items) for items in prices.values())
                 total_groups = len(prices)
                 
-                st.success(f"✅ Импортировано цен: **{total_items}** позиций из **{total_groups}** групп")
+                st.success(f"✅ Файл прочитан: **{total_items}** позиций из **{total_groups}** групп")
                 
                 # Показываем примеры
                 with st.expander("📋 Просмотр загруженных цен (первые 10)"):
@@ -2443,6 +2458,19 @@ elif page == "📥 Импорт данных по продажам":
                             item_name = GROUPS[group_idx]["items"][item_idx]["name"]
                             st.write(f"  • {item_name}: {price} грн")
                             count += 1
+                
+                # Кнопка применить
+                st.divider()
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.warning("⚠️ Это действие обновит актуальные цены")
+                with col2:
+                    if st.button("✅ Применить цены", type="primary", use_container_width=True, key='apply_prices'):
+                        st.session_state.sales_prices = st.session_state.temp_prices
+                        del st.session_state.temp_prices
+                        st.success("✅ Цены обновлены!")
+                        st.balloons()
+                        st.rerun()
                 
             except Exception as e:
                 st.error(f"❌ Ошибка при импорте: {str(e)}")
@@ -2470,10 +2498,11 @@ elif page == "📥 Импорт данных по продажам":
                     tmp.write(uploaded_plan.getvalue())
                     tmp_path = tmp.name
                 
-                # Импортируем план
+                # Импортируем план (НЕ сохраняем в session_state сразу)
                 with st.spinner('Загрузка плана продаж...'):
                     plan = import_sales_plan_from_excel(tmp_path)
-                    st.session_state.sales_plan_base = plan
+                    # Временно сохраняем для предпросмотра
+                    st.session_state.temp_plan = plan
                 
                 # Удаляем временный файл
                 try:
@@ -2486,7 +2515,7 @@ elif page == "📥 Импорт данных по продажам":
                 total_groups = len(plan)
                 total_kg = sum(sum(items.values()) for items in plan.values())
                 
-                st.success(f"✅ Импортировано планов: **{total_items}** позиций из **{total_groups}** групп")
+                st.success(f"✅ Файл прочитан: **{total_items}** позиций из **{total_groups}** групп")
                 st.info(f"📊 Общий план продаж: **{total_kg:,}** кг/мес")
                 
                 # Показываем примеры
@@ -2503,6 +2532,19 @@ elif page == "📥 Импорт данных по продажам":
                             item_name = GROUPS[group_idx]["items"][item_idx]["name"]
                             st.write(f"  • {item_name}: {plan_kg:,} кг")
                             count += 1
+                
+                # Кнопка применить
+                st.divider()
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.warning("⚠️ Это действие обновит план продаж")
+                with col2:
+                    if st.button("✅ Применить план", type="primary", use_container_width=True, key='apply_plan'):
+                        st.session_state.sales_plan_base = st.session_state.temp_plan
+                        del st.session_state.temp_plan
+                        st.success("✅ План продаж обновлён!")
+                        st.balloons()
+                        st.rerun()
                 
             except Exception as e:
                 st.error(f"❌ Ошибка при импорте: {str(e)}")
@@ -2717,15 +2759,6 @@ elif page == "✅ Фиксация даты прихода заказа":
     # Кнопка сброса всех дат
     st.markdown("---")
     
-    # ОТЛАДКА: показываем что в session_state
-    with st.expander("🔍 Отладка: Зафиксированные даты"):
-        st.write("**Содержимое st.session_state.arrival_fixed_dates:**")
-        if st.session_state.arrival_fixed_dates:
-            for group_name, date in st.session_state.arrival_fixed_dates.items():
-                st.write(f"- `{group_name}`: {date.strftime('%d.%m.%Y %H:%M:%S')}")
-        else:
-            st.write("Пусто")
-    
     if st.button("🔄 Сбросить все даты на автоматические", use_container_width=False):
         st.session_state.arrival_fixed_dates = {}
         st.success("✅ Все даты сброшены на автоматические")
@@ -2736,31 +2769,131 @@ elif page == "📈 Аналитика по продажам":
     st.title("📈 Аналитика по продажам")
     st.caption("Визуализация динамики продаж и отклонений от плана")
     
-    st.info("🚧 **В разработке**")
+    # Проверяем что есть данные
+    has_prices = len(st.session_state.get("sales_prices", {})) > 0
+    has_plan = len(st.session_state.get("sales_plan_base", {})) > 0
     
-    st.markdown("""
-    ### 📊 Планируемая аналитика:
+    if not has_prices or not has_plan:
+        st.warning("⚠️ Сначала импортируйте данные по продажам")
+        st.caption("Перейдите в раздел 'Импорт данных по продажам'")
+        st.stop()
     
-    **1. Динамика продаж**
-    - График план vs факт по месяцам
-    - Выполнение плана в %
-    - Тренды по группам товаров
+    # Проверяем что симуляция выполнена
+    if st.session_state.results is None:
+        st.warning("⚠️ Сначала выполните пересчёт закупок")
+        st.stop()
     
-    **2. Отклонения от плана**
-    - Группы с недовыполнением/перевыполнением
-    - Анализ причин отклонений
-    - Критические позиции
+    # ========================================================================
+    # БЛОК 1: МЕТРИКИ ПО ОСТАТКАМ ТЕКУЩЕГО МЕСЯЦА
+    # ========================================================================
+    st.subheader("📊 Анализ остатков на начало текущего месяца")
     
-    **3. Прогнозы**
-    - Прогноз продаж на следующий месяц
-    - Рекомендации по корректировке планов
-    - Сезонные факторы
+    # Получаем план продаж
+    sales_plan = st.session_state.get("sales_plan_base", {})
+    results = st.session_state.results
     
-    **4. Эффективность**
-    - Оборачиваемость по группам
-    - Динамика цен
-    - Рентабельность по позициям
-    """)
+    # Анализируем ТОЛЬКО текущий месяц (mi=0)
+    mi = 0
+    insufficient_stock_count = 0  # Остаток < план
+    critical_stock_count = 0  # Остаток < 50% плана
+    total_positions_with_plan = 0  # Всего позиций с планом
+    
+    # Для списков критичных позиций
+    insufficient_list = []
+    critical_list = []
+    
+    for group_idx, group in enumerate(st.session_state.groups):
+        # Получаем план продаж для группы (кг/месяц)
+        group_sales_plan = sales_plan.get(group_idx, {})
+        
+        # Для каждой позиции в группе проверяем её остаток
+        for item_idx, item in enumerate(group["items"]):
+            item_plan = group_sales_plan.get(item_idx, 0)
+            
+            if item_plan > 0:  # Проверяем только позиции с планом
+                total_positions_with_plan += 1
+                
+                # Берём остаток ПОЗИЦИИ напрямую из balance
+                item_stock = item.get("balance", 0)
+                
+                # Проверяем условия
+                if item_stock < item_plan:  # Остаток меньше месячного плана
+                    insufficient_stock_count += 1
+                    insufficient_list.append({
+                        "Группа": group["name"],
+                        "Позиция": item["name"],
+                        "Остаток": f"{item_stock:,.0f} кг",
+                        "План": f"{item_plan:,.0f} кг",
+                        "Дефицит": f"{item_plan - item_stock:,.0f} кг",
+                        "% обеспеченности": f"{(item_stock / item_plan * 100):.0f}%" if item_plan > 0 else "—"
+                    })
+                
+                if item_stock < item_plan * 0.5:  # Остаток меньше 50% месячного плана
+                    critical_stock_count += 1
+                    critical_list.append({
+                        "Группа": group["name"],
+                        "Позиция": item["name"],
+                        "Остаток": f"{item_stock:,.0f} кг",
+                        "План": f"{item_plan:,.0f} кг",
+                        "Дефицит": f"{item_plan - item_stock:,.0f} кг",
+                        "% обеспеченности": f"{(item_stock / item_plan * 100):.0f}%" if item_plan > 0 else "—"
+                    })
+    
+    # Показываем метрики для текущего месяца
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "Позиций с остатком < плана",
+            insufficient_stock_count,
+            help=f"Количество позиций на начало текущего месяца, остаток которых меньше месячного плана продаж (из {total_positions_with_plan} позиций с планом)"
+        )
+    
+    with col2:
+        st.metric(
+            "Позиций с остатком < 50% плана",
+            critical_stock_count,
+            help="Количество позиций на начало текущего месяца, остаток которых меньше половины месячного плана продаж"
+        )
+    
+    with col3:
+        # Процент критичных от ВСЕХ позиций с планом
+        # Критичные = недостаточные + критичные (все с проблемами)
+        total_critical = insufficient_stock_count + critical_stock_count
+        if total_positions_with_plan > 0:
+            critical_pct = (total_critical / total_positions_with_plan) * 100
+        else:
+            critical_pct = 0
+        
+        st.metric(
+            "% критичных позиций",
+            f"{critical_pct:.0f}%",
+            help=f"Процент всех позиций с недостаточным остатком от всех позиций с планом ({total_critical} из {total_positions_with_plan})"
+        )
+    
+    st.divider()
+    
+    # Таблицы с критичными позициями
+    st.subheader("📋 Списки позиций с недостаточным остатком")
+    
+    tab1, tab2 = st.tabs([
+        f"⚠️ Остаток < план ({insufficient_stock_count})",
+        f"🔴 Остаток < 50% плана ({critical_stock_count})"
+    ])
+    
+    with tab1:
+        if insufficient_list:
+            df_insufficient = pd.DataFrame(insufficient_list)
+            st.dataframe(df_insufficient, use_container_width=True, hide_index=True, height=400)
+        else:
+            st.success("✅ Все позиции обеспечены на месяц!")
+    
+    with tab2:
+        if critical_list:
+            df_critical = pd.DataFrame(critical_list)
+            st.dataframe(df_critical, use_container_width=True, hide_index=True, height=400)
+        else:
+            st.success("✅ Критичных позиций нет!")
 
 
 # Футер

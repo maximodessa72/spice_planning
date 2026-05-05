@@ -4,13 +4,17 @@ streamlit run app.py
 
 https://github.com/maximodessa72/spice_planning.git
 
+1. открыть Git Bash
+2. cd перетащить папку
+3. набрать три команды в терминале папки проекта
+
 bash# 
 1. Открой Git Bash в папке проекта
 # 2. Внеси изменения в файлы (например, в data.py)
 # 3. Выполни команды:
 
 git add .
-git commit -m "c 18 на 12"
+git commit -m "фиксация дат"
 git push
 
 [passwords]
