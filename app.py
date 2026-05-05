@@ -23,7 +23,9 @@ def save_state():
     """Сохранение состояния в файл"""
     try:
         state_data = {
-            "groups": st.session_state.groups
+            "groups": st.session_state.groups,
+            "sales_plan_base": st.session_state.get("sales_plan_base", {}),
+            "sales_prices": st.session_state.get("sales_prices", {})
         }
         with open(STATE_FILE, 'w', encoding='utf-8') as f:
             json.dump(state_data, f, ensure_ascii=False, indent=2)
@@ -36,7 +38,7 @@ def load_state():
         try:
             with open(STATE_FILE, 'r', encoding='utf-8') as f:
                 state_data = json.load(f)
-            return state_data.get("groups")
+            return state_data
         except Exception as e:
             st.error(f"Ошибка загрузки: {e}")
     return None
@@ -130,14 +132,18 @@ def cleanup_old_confirmed_orders():
 # Инициализация session state
 if 'groups' not in st.session_state:
     # Пытаемся загрузить из файла
-    loaded_groups = load_state()
-    if loaded_groups:
-        st.session_state.groups = loaded_groups
+    loaded_state = load_state()
+    if loaded_state:
+        st.session_state.groups = loaded_state.get("groups", GROUPS)
+        st.session_state.sales_plan_base = loaded_state.get("sales_plan_base", {})
+        st.session_state.sales_prices = loaded_state.get("sales_prices", {})
         st.success("✅ Данные загружены из сохранённого состояния")
     else:
         # Загружаем из data.py
         cleanup_old_confirmed_orders()
         st.session_state.groups = GROUPS
+        st.session_state.sales_plan_base = {}
+        st.session_state.sales_prices = {}
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'need_recalc' not in st.session_state:
