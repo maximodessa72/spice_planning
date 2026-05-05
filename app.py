@@ -6,6 +6,8 @@
 import math
 import streamlit as st
 import pandas as pd
+import json
+import os
 from data import GROUPS, N_MONTHS
 from simulation import (
     run_all_simulations, 
@@ -13,6 +15,31 @@ from simulation import (
     get_critical_groups,
     get_plan
 )
+
+# ========== АВТОСОХРАНЕНИЕ ==========
+STATE_FILE = "app_state.json"
+
+def save_state():
+    """Сохранение состояния в файл"""
+    try:
+        state_data = {
+            "groups": st.session_state.groups
+        }
+        with open(STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(state_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.error(f"Ошибка сохранения: {e}")
+
+def load_state():
+    """Загрузка состояния из файла"""
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+            return state_data.get("groups")
+        except Exception as e:
+            st.error(f"Ошибка загрузки: {e}")
+    return None
 
 # Настройка страницы
 st.set_page_config(
@@ -102,8 +129,15 @@ def cleanup_old_confirmed_orders():
 
 # Инициализация session state
 if 'groups' not in st.session_state:
-    cleanup_old_confirmed_orders()  # Очистка перед загрузкой
-    st.session_state.groups = GROUPS
+    # Пытаемся загрузить из файла
+    loaded_groups = load_state()
+    if loaded_groups:
+        st.session_state.groups = loaded_groups
+        st.success("✅ Данные загружены из сохранённого состояния")
+    else:
+        # Загружаем из data.py
+        cleanup_old_confirmed_orders()
+        st.session_state.groups = GROUPS
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'need_recalc' not in st.session_state:
@@ -137,6 +171,7 @@ def recalculate():
     """Пересчитать симуляцию"""
     with st.spinner('Пересчёт симуляции...'):
         st.session_state.results = run_all_simulations(st.session_state.groups)
+        save_state()
         st.session_state.need_recalc = False
 
 
@@ -687,6 +722,7 @@ elif page == "📥 Импорт данных по закупкам":
                                     
                                     # Пересчёт
                                     st.session_state.results = run_all_simulations(st.session_state.groups)
+                                    save_state()
                                     st.session_state.need_recalc = False
                                     
                                     st.success("✅ Остатки обновлены и пересчитаны!")
@@ -832,6 +868,7 @@ elif page == "📥 Импорт данных по закупкам":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
+                            save_state()
                             st.session_state.need_recalc = False
                             
                             st.success("✅ Планы обновлены и пересчитаны!")
@@ -863,6 +900,7 @@ elif page == "✅ Подтверждение заказов":
     if st.session_state.need_recalc or st.session_state.results is None:
         with st.spinner('Пересчёт...'):
             st.session_state.results = run_all_simulations(st.session_state.groups)
+            save_state()
             st.session_state.need_recalc = False
     
     results = st.session_state.results
@@ -1027,6 +1065,7 @@ elif page == "✅ Подтверждение заказов":
                     
                     # Пересчёт
                     st.session_state.results = run_all_simulations(st.session_state.groups)
+                    save_state()
                     st.session_state.need_recalc = False
                     
                     # Очищаем временные данные
@@ -1192,6 +1231,7 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
+                            save_state()
                             st.session_state.need_recalc = False
                             
                             st.success(f"✅ Заказ перемещён: {order['Месяц прихода']} → {get_month_label(new_mi)}")
@@ -1224,6 +1264,7 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
+                            save_state()
                             st.session_state.need_recalc = False
                             
                             st.success(f"✅ Заказ перемещён: {order['Месяц прихода']} → {get_month_label(new_mi)}")
@@ -1261,6 +1302,7 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
+                            save_state()
                             st.session_state.need_recalc = False
                             
                             st.success("✅ Заказ полностью удалён!")
@@ -1387,6 +1429,7 @@ elif page == "✅ Подтверждение заказов":
                     
                     # Пересчёт
                     st.session_state.results = run_all_simulations(st.session_state.groups)
+                    save_state()
                     st.session_state.need_recalc = False
                     
                     # Закрываем форму редактирования
