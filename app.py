@@ -7,7 +7,6 @@ import math
 import streamlit as st
 import pandas as pd
 import json
-import os
 from data import GROUPS, N_MONTHS
 from simulation import (
     run_all_simulations, 
@@ -15,33 +14,6 @@ from simulation import (
     get_critical_groups,
     get_plan
 )
-
-# ========== АВТОСОХРАНЕНИЕ ==========
-STATE_FILE = "app_state.json"
-
-def save_state():
-    """Сохранение состояния в файл"""
-    try:
-        state_data = {
-            "groups": st.session_state.groups,
-            "sales_plan_base": st.session_state.get("sales_plan_base", {}),
-            "sales_prices": st.session_state.get("sales_prices", {})
-        }
-        with open(STATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(state_data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        st.error(f"Ошибка сохранения: {e}")
-
-def load_state():
-    """Загрузка состояния из файла"""
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, 'r', encoding='utf-8') as f:
-                state_data = json.load(f)
-            return state_data
-        except Exception as e:
-            st.error(f"Ошибка загрузки: {e}")
-    return None
 
 # Настройка страницы
 st.set_page_config(
@@ -131,19 +103,12 @@ def cleanup_old_confirmed_orders():
 
 # Инициализация session state
 if 'groups' not in st.session_state:
-    # Пытаемся загрузить из файла
-    loaded_state = load_state()
-    if loaded_state:
-        st.session_state.groups = loaded_state.get("groups", GROUPS)
-        st.session_state.sales_plan_base = loaded_state.get("sales_plan_base", {})
-        st.session_state.sales_prices = loaded_state.get("sales_prices", {})
-        st.success("✅ Данные загружены из сохранённого состояния")
-    else:
-        # Загружаем из data.py
-        cleanup_old_confirmed_orders()
-        st.session_state.groups = GROUPS
-        st.session_state.sales_plan_base = {}
-        st.session_state.sales_prices = {}
+    cleanup_old_confirmed_orders()
+    st.session_state.groups = GROUPS
+if 'sales_plan_base' not in st.session_state:
+    st.session_state.sales_plan_base = {}
+if 'sales_prices' not in st.session_state:
+    st.session_state.sales_prices = {}
 if 'results' not in st.session_state:
     st.session_state.results = None
 if 'need_recalc' not in st.session_state:
@@ -177,7 +142,6 @@ def recalculate():
     """Пересчитать симуляцию"""
     with st.spinner('Пересчёт симуляции...'):
         st.session_state.results = run_all_simulations(st.session_state.groups)
-        save_state()
         st.session_state.need_recalc = False
 
 
@@ -193,6 +157,113 @@ with st.sidebar:
         st.info("👤 Пользователь (только просмотр)")
     
     st.divider()
+    
+    # СОХРАНЕНИЕ/ЗАГРУЗКА СОСТОЯНИЯ
+    if user_role == "admin":
+        st.markdown("### 💾 Резервное копирование")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Экспорт состояния
+            state_json = json.dumps({
+                "groups": st.session_state.groups,
+                "sales_plan_base": st.session_state.get("sales_plan_base", {}),
+                "sales_prices": st.session_state.get("sales_prices", {})
+            }, ensure_ascii=False, indent=2)
+            
+            st.download_button(
+                label="📥 Скачать состояние (JSON)",
+                data=state_json,
+                file_name="app_state_backup.json",
+                mime="application/json",
+                use_container_width=True,
+                help="Скачайте перед обновлением приложения"
+            )
+        
+        with col2:
+            # Импорт состояния
+            uploaded_state = st.file_uploader(
+                "Загрузить состояние",
+                type=['json'],
+                key='state_upload',
+                label_visibility="collapsed",
+                help="Восстановить после обновления"
+            )
+            
+            if uploaded_state:
+                try:
+                    state_data = json.load(uploaded_state)
+                    
+                    if st.button("✅ Восстановить состояние", type="primary", use_container_width=True):
+                        # Восстанавливаем данные
+                        groups = state_data.get("groups", GROUPS)
+                        
+                        # Исправляем plan_override для сезонных позиций (из dict в list)
+                        for group in groups:
+                            # Конвертируем ключи in_transit в int
+                            if "in_transit" in group:
+                                group["in_transit"] = {int(k): v for k, v in group["in_transit"].items()}
+                            if "week_arrival" in group:
+                                group["week_arrival"] = {int(k): v for k, v in group["week_arrival"].items()}
+                            
+                            for item in group.get("items", []):
+                                # Конвертируем ключи in_transit в int
+                                if "in_transit" in item:
+                                    item["in_transit"] = {int(k): v for k, v in item["in_transit"].items()}
+                                
+                                # Исправляем plan_override для сезонных
+                                if item.get("seasonal") and "plan_override" in item:
+                                    po = item["plan_override"]
+                                    if isinstance(po, dict):
+                                        # Конвертируем {0: val, 1: val, ...} в [val, val, ...]
+                                        item["plan_override"] = [po[str(i)] if str(i) in po else po.get(i, 0) for i in range(12)]
+                        
+                        st.session_state.groups = groups
+                        
+                        # Конвертируем ключи в sales_plan_base {group_idx: {item_idx: {month_idx: value}}}
+                        sales_plan = state_data.get("sales_plan_base", {})
+                        if sales_plan:
+                            converted_plan = {}
+                            for group_key, items in sales_plan.items():
+                                group_idx = int(group_key)
+                                converted_plan[group_idx] = {}
+                                if isinstance(items, dict):
+                                    for item_key, months in items.items():
+                                        item_idx = int(item_key)
+                                        if isinstance(months, dict):
+                                            converted_plan[group_idx][item_idx] = {int(k): v for k, v in months.items()}
+                                        else:
+                                            converted_plan[group_idx][item_idx] = months
+                            st.session_state.sales_plan_base = converted_plan
+                        else:
+                            st.session_state.sales_plan_base = {}
+                        
+                        # Конвертируем ключи в sales_prices {group_idx: {item_idx: price}}
+                        sales_prices = state_data.get("sales_prices", {})
+                        if sales_prices:
+                            converted_prices = {}
+                            for group_key, items in sales_prices.items():
+                                group_idx = int(group_key)
+                                converted_prices[group_idx] = {}
+                                if isinstance(items, dict):
+                                    for item_key, price in items.items():
+                                        item_idx = int(item_key)
+                                        converted_prices[group_idx][item_idx] = price
+                            st.session_state.sales_prices = converted_prices
+                        else:
+                            st.session_state.sales_prices = {}
+                        
+                        st.session_state.results = None
+                        st.session_state.need_recalc = True
+                        
+                        st.success("✅ Состояние восстановлено!")
+                        st.balloons()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Ошибка загрузки: {e}")
+        
+        st.divider()
     
     # УРОВЕНЬ 1: Выбор направления
     st.markdown("### 🎯 Направление")
@@ -728,7 +799,6 @@ elif page == "📥 Импорт данных по закупкам":
                                     
                                     # Пересчёт
                                     st.session_state.results = run_all_simulations(st.session_state.groups)
-                                    save_state()
                                     st.session_state.need_recalc = False
                                     
                                     st.success("✅ Остатки обновлены и пересчитаны!")
@@ -798,7 +868,11 @@ elif page == "📥 Импорт данных по закупкам":
                     if pd.isna(new_plan):
                         continue
                     
-                    new_plan = float(new_plan)
+                    # Пропускаем текстовые заголовки
+                    try:
+                        new_plan = float(new_plan)
+                    except (ValueError, TypeError):
+                        continue
                     
                     # Ищем позицию в группах
                     found = False
@@ -874,7 +948,6 @@ elif page == "📥 Импорт данных по закупкам":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
-                            save_state()
                             st.session_state.need_recalc = False
                             
                             st.success("✅ Планы обновлены и пересчитаны!")
@@ -906,7 +979,6 @@ elif page == "✅ Подтверждение заказов":
     if st.session_state.need_recalc or st.session_state.results is None:
         with st.spinner('Пересчёт...'):
             st.session_state.results = run_all_simulations(st.session_state.groups)
-            save_state()
             st.session_state.need_recalc = False
     
     results = st.session_state.results
@@ -1071,7 +1143,6 @@ elif page == "✅ Подтверждение заказов":
                     
                     # Пересчёт
                     st.session_state.results = run_all_simulations(st.session_state.groups)
-                    save_state()
                     st.session_state.need_recalc = False
                     
                     # Очищаем временные данные
@@ -1237,7 +1308,6 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
-                            save_state()
                             st.session_state.need_recalc = False
                             
                             st.success(f"✅ Заказ перемещён: {order['Месяц прихода']} → {get_month_label(new_mi)}")
@@ -1270,7 +1340,6 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
-                            save_state()
                             st.session_state.need_recalc = False
                             
                             st.success(f"✅ Заказ перемещён: {order['Месяц прихода']} → {get_month_label(new_mi)}")
@@ -1308,7 +1377,6 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
-                            save_state()
                             st.session_state.need_recalc = False
                             
                             st.success("✅ Заказ полностью удалён!")
@@ -1435,7 +1503,6 @@ elif page == "✅ Подтверждение заказов":
                     
                     # Пересчёт
                     st.session_state.results = run_all_simulations(st.session_state.groups)
-                    save_state()
                     st.session_state.need_recalc = False
                     
                     # Закрываем форму редактирования
