@@ -37,6 +37,61 @@ def get_week(w: float) -> tuple:
         return "Тиж. 4", "1565C0"
 
 
+def get_arrival_day_from_week(week_label: str) -> int:
+    """
+    Получить день прихода по метке недели
+    
+    пред.мес / Тиж. 1 → 5-е число
+    Тиж. 2 → 10-е число
+    Тиж. 3 → 15-е число
+    Тиж. 4 → 20-е число
+    """
+    if "пред" in week_label.lower() or "1" in week_label:
+        return 5
+    elif "2" in week_label:
+        return 10
+    elif "3" in week_label:
+        return 15
+    elif "4" in week_label:
+        return 20
+    else:
+        return 5  # По умолчанию начало месяца
+
+
+def calculate_proportional_plan(monthly_plan: float, arrival_day: int) -> float:
+    """
+    Рассчитать пропорциональный план продаж после прихода товара
+    
+    Args:
+        monthly_plan: полный план продаж на месяц
+        arrival_day: день прихода (5, 10, 15, 20)
+    
+    Returns:
+        Пропорциональный план с учётом оставшихся рабочих дней
+    """
+    # Всего рабочих дней в месяце (примерно)
+    TOTAL_WORKING_DAYS = 21
+    
+    # Рабочие дни после прихода (примерная оценка)
+    # 5-е число → ~17 дней (21 - 4)
+    # 10-е число → ~14 дней (21 - 7)
+    # 15-е число → ~10 дней (21 - 11)
+    # 20-е число → ~6 дней (21 - 15)
+    days_mapping = {
+        5: 17,   # неделя 1
+        10: 14,  # неделя 2
+        15: 10,  # неделя 3
+        20: 6    # неделя 4
+    }
+    
+    days_after_arrival = days_mapping.get(arrival_day, 17)
+    
+    # Пропорциональный план
+    proportional_plan = monthly_plan * (days_after_arrival / TOTAL_WORKING_DAYS)
+    
+    return proportional_plan
+
+
 def get_buffer_color(w: float) -> str:
     """
     Получить цвет для ячейки буфера (светлая палитра)
@@ -276,7 +331,21 @@ def run_simulation(group: Dict) -> List[Dict]:
                 wn += (bsi[it["name"]] / pi) * pi
                 wd += pi
         w_buf_before = round(wn / wd, 2) if wd > 0 else 99
-        wl, wc = get_week(w_buf_before)
+        
+        # Проверяем есть ли зафиксированный номер недели в week_arrival
+        if "week_arrival" in group and i in group["week_arrival"]:
+            week_num = group["week_arrival"][i]
+            # Формируем метку из номера недели
+            week_labels = {
+                1: ("Тиж. 1", "E65100"),
+                2: ("Тиж. 2", "F9A825"),
+                3: ("Тиж. 3", "2E7D32"),
+                4: ("Тиж. 4", "1565C0")
+            }
+            wl, wc = week_labels.get(week_num, get_week(w_buf_before))
+        else:
+            # Автоматическое определение по буферу
+            wl, wc = get_week(w_buf_before)
         
         # Распределение прихода по позициям
         ia = {}
@@ -322,9 +391,27 @@ def run_simulation(group: Dict) -> List[Dict]:
             for it in group["items"]
         }
         
-        # Обновляем остатки позиций
+        # Сохраняем остаток на начало месяца для расчётов
+        balance_start = balance
+        
+        # Обновляем остатки позиций с учётом недели прихода
         for it in group["items"]:
-            item_state[it["name"]] = max(0, item_state[it["name"]] + ia[it["name"]] - get_plan(it, i))
+            item_balance_start = item_state[it["name"]]
+            item_arrival = ia[it["name"]]
+            item_plan = get_plan(it, i)
+            
+            # ВАЖНО: проверяем остаток ПОЗИЦИИ, а не группы!
+            if item_balance_start >= item_plan:
+                # Товара ЭТОЙ позиции хватало — используем полный план
+                item_state[it["name"]] = max(0, item_balance_start + item_arrival - item_plan)
+            elif item_arrival > 0:
+                # Товара ЭТОЙ позиции не хватало, есть приход — используем пропорциональный план
+                arrival_day = get_arrival_day_from_week(wl)
+                item_plan_after = calculate_proportional_plan(item_plan, arrival_day)
+                item_state[it["name"]] = max(0, item_arrival - item_plan_after)
+            else:
+                # Нет прихода
+                item_state[it["name"]] = max(0, item_balance_start - item_plan)
         
         # Проверка необходимости заказа
         bf = future_bal(balance + arrive, pending, i, cycle_m, group, buffer)
@@ -361,7 +448,29 @@ def run_simulation(group: Dict) -> List[Dict]:
             "tpi": tpi
         })
         
-        balance = max(0, balance + arrive - tpi)
+        # Расчёт остатка на конец месяца с учётом недели прихода
+        # (balance_start уже определён выше перед циклом item_state)
+        
+        if balance_start >= tpi:
+            # СЛУЧАЙ 1: Товара хватало на весь месяц
+            # Продали полный план, приход добавляется в конце
+            balance = balance_start + arrive - tpi
+        elif arrive > 0:
+            # СЛУЧАЙ 2: Товара не хватало, ждали приход
+            # Продали остаток до прихода + пропорциональный план после прихода
+            
+            # Определяем день прихода по метке недели
+            arrival_day = get_arrival_day_from_week(wl)
+            
+            # Пропорциональный план после прихода
+            plan_after_arrival = calculate_proportional_plan(tpi, arrival_day)
+            
+            # Остаток = приход - план после прихода
+            # (остаток до прихода был израсходован полностью)
+            balance = max(0, arrive - plan_after_arrival)
+        else:
+            # СЛУЧАЙ 3: Нет прихода, товара не хватало
+            balance = max(0, balance_start - tpi)
     
     return results
 

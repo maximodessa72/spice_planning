@@ -14,7 +14,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "импорт данных и аналитика"
+git commit -m "редактор заказов в утвержд заказах"
 git push
 
 [passwords]

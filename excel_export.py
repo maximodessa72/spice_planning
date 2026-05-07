@@ -264,7 +264,23 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                 # 3. Приход
                 c = ws.cell(row=data_row, column=col + 2)
                 if r["arrive"] > 0:
-                    week_label = get_week_label(r["w_buf_before"])
+                    # ИСПОЛЬЗУЕМ week_label из симуляции (учитывает week_arrival)
+                    week_label_full = r.get("wl", "")
+                    
+                    # Конвертируем метку из simulation.py в краткий формат
+                    if "пред" in week_label_full.lower():
+                        week_label = "пред.мес"
+                    elif "Тиж. 1" in week_label_full:
+                        week_label = "Нед.1"
+                    elif "Тиж. 2" in week_label_full:
+                        week_label = "Нед.2"
+                    elif "Тиж. 3" in week_label_full:
+                        week_label = "Нед.3"
+                    elif "Тиж. 4" in week_label_full:
+                        week_label = "Нед.4"
+                    else:
+                        # Fallback на старый метод если метка не распознана
+                        week_label = get_week_label(r["w_buf_before"])
                     
                     # ФИКСИРОВАННЫЕ заказы (in_transit) - ВСЕГДА коричневые
                     if r["in_transit"]:
@@ -273,8 +289,8 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                         c.fill = PatternFill(start_color='5D4037', end_color='5D4037', fill_type='solid')
                         c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
                     else:
-                        # НОВЫЕ заказы - цвет по метке недели
-                        week_color = get_week_color(r["w_buf_before"])
+                        # НОВЫЕ заказы - цвет из симуляции (учитывает week_arrival)
+                        week_color = r.get("wc", "D5F5E3")  # Fallback на зелёный
                         
                         # Цвет текста: белый для тёмных фонов, чёрный для светлых
                         if week_color in ['FF0000', '1565C0']:

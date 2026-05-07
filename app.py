@@ -169,7 +169,9 @@ with st.sidebar:
             state_json = json.dumps({
                 "groups": st.session_state.groups,
                 "sales_plan_base": st.session_state.get("sales_plan_base", {}),
-                "sales_prices": st.session_state.get("sales_prices", {})
+                "sales_prices": st.session_state.get("sales_prices", {}),
+                "arrival_fixed_dates": {k: v.isoformat() if hasattr(v, 'isoformat') else str(v) 
+                                       for k, v in st.session_state.get("arrival_fixed_dates", {}).items()}
             }, ensure_ascii=False, indent=2)
             
             st.download_button(
@@ -253,6 +255,20 @@ with st.sidebar:
                             st.session_state.sales_prices = converted_prices
                         else:
                             st.session_state.sales_prices = {}
+                        
+                        # Загружаем даты прихода
+                        from datetime import datetime
+                        arrival_dates = state_data.get("arrival_fixed_dates", {})
+                        if arrival_dates:
+                            converted_dates = {}
+                            for group_name, date_str in arrival_dates.items():
+                                try:
+                                    converted_dates[group_name] = datetime.fromisoformat(date_str)
+                                except:
+                                    pass
+                            st.session_state.arrival_fixed_dates = converted_dates
+                        else:
+                            st.session_state.arrival_fixed_dates = {}
                         
                         st.session_state.results = None
                         st.session_state.need_recalc = True
@@ -1474,14 +1490,10 @@ elif page == "✅ Подтверждение заказов":
                         # Находим соответствующую позицию в группе
                         for item in target_group["items"]:
                             if item["name"] == edited["item"]["name"]:
-                                if edited["new_weight"] > 0:
-                                    if "in_transit" not in item:
-                                        item["in_transit"] = {}
-                                    item["in_transit"][editing_mi] = edited["new_weight"]
-                                else:
-                                    # Удаляем позицию если вес = 0
-                                    if "in_transit" in item and editing_mi in item["in_transit"]:
-                                        del item["in_transit"][editing_mi]
+                                # ВСЕГДА сохраняем значение (даже 0) чтобы заказ оставался фиксированным
+                                if "in_transit" not in item:
+                                    item["in_transit"] = {}
+                                item["in_transit"][editing_mi] = edited["new_weight"]
                                 break
                     
                     # Сохраняем номер недели
@@ -2950,7 +2962,8 @@ elif page == "✅ Фиксация даты прихода заказа":
                     "week_label": week_label,
                     "auto_day": auto_day,
                     "current_date": current_date,
-                    "is_fixed": is_fixed
+                    "is_fixed": is_fixed,
+                    "_arrival_mi": procurement_current_mi  # Месяц прихода для week_arrival
                 })
     
     if not orders_current_month:
@@ -3038,8 +3051,32 @@ elif page == "✅ Фиксация даты прихода заказа":
         st.write("")
         if st.button("💾 Зафиксировать", type="primary", use_container_width=True):
             # Сохраняем дату
-            st.session_state.arrival_fixed_dates[selected_order["group_name"]] = datetime.combine(new_date, datetime.min.time())
-            st.success(f"✅ Дата для '{selected_order['group_name']}' зафиксирована: {new_date.strftime('%d.%m.%Y')}")
+            fixed_datetime = datetime.combine(new_date, datetime.min.time())
+            st.session_state.arrival_fixed_dates[selected_order["group_name"]] = fixed_datetime
+            
+            # Автоматически вычисляем номер недели из даты
+            week_number = (new_date.day - 1) // 7 + 1  # Неделя 1-4
+            
+            # Находим группу и обновляем week_arrival
+            for group in st.session_state.groups:
+                if group["name"] == selected_order["group_name"]:
+                    # Находим mi для текущего месяца
+                    # selected_order содержит данные для текущего месяца
+                    arrival_mi = selected_order.get("_arrival_mi", 0)  # mi месяца прихода
+                    
+                    if "week_arrival" not in group:
+                        group["week_arrival"] = {}
+                    group["week_arrival"][arrival_mi] = week_number
+                    break
+            
+            # КРИТИЧНО: Пересчитываем симуляцию после изменения
+            st.session_state.results = run_all_simulations(st.session_state.groups)
+            st.session_state.need_recalc = False
+            
+            # Отладка
+            st.info(f"🔍 DEBUG: arrival_mi={arrival_mi}, week_number={week_number}, group_name={selected_order['group_name']}")
+            
+            st.success(f"✅ Дата для '{selected_order['group_name']}' зафиксирована: {new_date.strftime('%d.%m.%Y')} (неделя {week_number})")
             st.rerun()
     
     # Кнопка сброса всех дат

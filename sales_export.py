@@ -143,7 +143,8 @@ def calculate_sales_plan(opening_balance: float, arrival_kg: float, base_plan: f
 
 
 def calculate_working_days_for_month(mi: int, group_name: str, week_label: str, 
-                                     arrival_kg: float, arrival_fixed_dates: Dict) -> int:
+                                     arrival_kg: float, arrival_fixed_dates: Dict,
+                                     group: Dict = None) -> int:
     """
     Рассчитать рабочие дни для месяца с учётом зафиксированных дат
     
@@ -153,6 +154,7 @@ def calculate_working_days_for_month(mi: int, group_name: str, week_label: str,
         week_label: метка недели из симуляции
         arrival_kg: количество прихода
         arrival_fixed_dates: зафиксированные даты {group_name: datetime}
+        group: данные группы (для week_arrival)
     
     Returns:
         Количество рабочих дней
@@ -180,7 +182,15 @@ def calculate_working_days_for_month(mi: int, group_name: str, week_label: str,
         # Рассчитываем точные рабочие дни
         return calculate_working_days_exact(fixed_date, month_end)
     else:
-        # Для будущих месяцев используем недели
+        # ПРИОРИТЕТ 1: Проверяем зафиксированный номер недели в week_arrival
+        if group and "week_arrival" in group:
+            week_num = group["week_arrival"].get(mi)
+            if week_num:
+                # Используем номер недели из week_arrival
+                week_key = f"нед {week_num}"
+                return WORKING_DAYS_BY_WEEK.get(week_key, WORKING_DAYS_BY_WEEK[None])
+        
+        # ПРИОРИТЕТ 2: Для будущих месяцев используем метку из симуляции
         if "Тиж. 1" in week_label or "пред" in week_label.lower():
             return WORKING_DAYS_BY_WEEK["нед 1"]
         elif "Тиж. 2" in week_label:
@@ -416,7 +426,7 @@ def create_sales_excel(procurement_results: Dict[str, List[Dict]],
                 
                 # Рабочие дни (с учётом зафиксированных дат)
                 working_days = calculate_working_days_for_month(
-                    mi, group_name, week_label, arrival_kg, arrival_fixed_dates
+                    mi, group_name, week_label, arrival_kg, arrival_fixed_dates, group
                 )
                 
                 # План продаж
@@ -668,7 +678,7 @@ def create_sales_excel(procurement_results: Dict[str, List[Dict]],
                 
                 # Рассчитываем рабочие дни с учётом зафиксированных дат
                 working_days = calculate_working_days_for_month(
-                    mi, group_name, week_label, arrival_kg, arrival_fixed_dates
+                    mi, group_name, week_label, arrival_kg, arrival_fixed_dates, group
                 )
                 
                 # Определяем базовый план для текущего месяца
@@ -828,7 +838,7 @@ def create_sales_excel(procurement_results: Dict[str, List[Dict]],
                 
                 # Рабочие дни (с учётом зафиксированных дат)
                 working_days = calculate_working_days_for_month(
-                    mi, group_name, week_label, arrival_kg, arrival_fixed_dates
+                    mi, group_name, week_label, arrival_kg, arrival_fixed_dates, group
                 )
                 
                 # План продаж
