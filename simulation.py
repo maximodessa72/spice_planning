@@ -258,34 +258,104 @@ def opt_rb(ckg: int, ibs: Dict, items: List, mi: int) -> Dict:
 def opt_std(ckg: int, ibs: Dict, items: List) -> Dict:
     """
     Стандартная оптимизация (пропорциональное распределение)
+    
+    Итеративный поиск коэффициента T чтобы все позиции получили
+    одинаковый буфер после округления и сумма = контейнер
+    
+    УЧИТЫВАЕМ НЕДЕЛЮ ПРИХОДА: по умолчанию неделя 2 (10-е число)
+    для расчёта пропорционального плана после прихода
     """
     active = [it for it in items if it["plan"] > 0]
     if not active:
         return {it["name"]: 0 for it in items}
     
+    # Неделя прихода для нефиксированных заказов (по умолчанию неделя 2)
+    DEFAULT_ARRIVAL_DAY = 10  # 10-е число → ~14 дней продаж из 21
+    days_after_arrival = 14  # Рабочих дней после прихода
+    days_total = 21
+    plan_coefficient = days_after_arrival / days_total  # 14/21 = 0.67
+    
     tp = sum(it["plan"] for it in active)
     tb = sum(ibs[it["name"]] for it in active)
-    T = (ckg + tb) / tp if tp > 0 else 0
     
-    opts = {
-        it["name"]: round_to(T * it["plan"] - ibs[it["name"]], item_bag(it)) if it["plan"] > 0 else 0
-        for it in items
-    }
+    # Начальная оценка T с учётом пропорционального плана
+    # Формула: (остаток + заказ - план×0.67) / план = T (буфер целевой)
+    # Упрощённо: T_initial ≈ (контейнер + остатки) / (планы × 0.67)
+    T_initial = (ckg + tb) / (tp * plan_coefficient) if tp > 0 else 0
     
-    # Подгонка
+    # Итеративный поиск оптимального T
+    T_min = 0.0
+    T_max = T_initial * 2
+    T = T_initial
+    best_T = T
+    best_diff = float('inf')
+    
+    # Бинарный поиск оптимального T
+    for iteration in range(50):
+        opts_temp = {}
+        for it in items:
+            if it["plan"] > 0:
+                balance_start = ibs[it["name"]]
+                plan_full = it["plan"]
+                
+                # ЕДИНАЯ ФОРМУЛА для всех позиций (независимо от остатка):
+                # Целевой буфер = T
+                # Остаток после = остаток + заказ - план×0.67
+                # T × план = остаток + заказ - план×0.67
+                # заказ = T × план + план×0.67 - остаток
+                raw_order = T * plan_full + plan_full * plan_coefficient - balance_start
+                
+                opts_temp[it["name"]] = round_to(max(0, raw_order), item_bag(it))
+            else:
+                opts_temp[it["name"]] = 0
+        
+        total = sum(opts_temp.values())
+        diff = total - ckg
+        
+        if abs(diff) < abs(best_diff):
+            best_diff = diff
+            best_T = T
+        
+        if abs(diff) <= 25:
+            break
+        
+        if diff > 0:
+            T_max = T
+        else:
+            T_min = T
+        
+        T = (T_min + T_max) / 2
+    
+    # Финальный расчёт с найденным T
+    opts = {}
+    for it in items:
+        if it["plan"] > 0:
+            balance_start = ibs[it["name"]]
+            plan_full = it["plan"]
+            
+            # ЕДИНАЯ ФОРМУЛА для всех позиций
+            # заказ = T × план + план×0.67 - остаток
+            raw_order = best_T * plan_full + plan_full * plan_coefficient - balance_start
+            
+            opts[it["name"]] = round_to(max(0, raw_order), item_bag(it))
+        else:
+            opts[it["name"]] = 0
+    
+    # Финальная подгонка если нужно
     diff = sum(opts.values()) - ckg
-    if diff > 0:
-        for it in sorted(active, key=lambda x: opts[x["name"]], reverse=True):
-            if diff <= 0:
-                break
-            mult = item_bag(it)
-            cut = (min(diff, opts[it["name"]]) // mult) * mult
-            if cut > 0:
-                opts[it["name"]] -= cut
-                diff -= cut
-    elif diff < 0:
-        top = max(active, key=lambda x: opts[x["name"]])
-        opts[top["name"]] += round_to(-diff, item_bag(top))
+    if abs(diff) > 25:
+        if diff > 0:
+            for it in sorted(active, key=lambda x: ibs[x["name"]], reverse=True):
+                if diff <= 0:
+                    break
+                mult = item_bag(it)
+                cut = (min(diff, opts[it["name"]]) // mult) * mult
+                if cut > 0:
+                    opts[it["name"]] -= cut
+                    diff -= cut
+        elif diff < 0:
+            top = max(active, key=lambda x: x["plan"])
+            opts[top["name"]] += round_to(-diff, item_bag(top))
     
     return opts
 
@@ -310,7 +380,16 @@ def run_simulation(group: Dict) -> List[Dict]:
     cycle_m = math.ceil(group["cycle"] / 30)
     ckg = group["container"]
     total_plan = sum(it["plan"] for it in group["items"])
+    
+    # Формируем pending из ДВУХ источников:
+    # 1. Фиксированные заказы (in_transit)
     pending = {k: v for k, v in group["in_transit"].items() if v > 0}
+    
+    # 2. Автоматические заказы (auto_orders, добавленные wrapper)
+    auto_orders = group.get("auto_orders", {})
+    for k, v in auto_orders.items():
+        pending[k] = pending.get(k, 0) + v
+    
     balance = sum(it["balance"] for it in group["items"])
     item_state = {it["name"]: it["balance"] for it in group["items"]}
     
@@ -402,40 +481,52 @@ def run_simulation(group: Dict) -> List[Dict]:
             
             # ВАЖНО: проверяем остаток ПОЗИЦИИ, а не группы!
             if item_balance_start >= item_plan:
-                # Товара ЭТОЙ позиции хватало — используем полный план
+                # СЛУЧАЙ 1: Товара ЭТОЙ позиции хватает на весь месяц
                 item_state[it["name"]] = max(0, item_balance_start + item_arrival - item_plan)
+                
             elif item_arrival > 0:
-                # Товара ЭТОЙ позиции не хватало, есть приход — используем пропорциональный план
+                # СЛУЧАЙ 2: Товара не хватает на весь месяц, но есть приход
                 arrival_day = get_arrival_day_from_week(wl)
+                
+                # calculate_proportional_plan возвращает план ПОСЛЕ прихода
                 item_plan_after = calculate_proportional_plan(item_plan, arrival_day)
-                item_state[it["name"]] = max(0, item_arrival - item_plan_after)
+                
+                # План ДО прихода
+                item_plan_before = item_plan - item_plan_after
+                
+                if item_balance_start >= item_plan_before:
+                    # ПОДСЛУЧАЙ 2А: Хватает до прихода → выполним полный план
+                    item_state[it["name"]] = max(0, item_balance_start + item_arrival - item_plan)
+                else:
+                    # ПОДСЛУЧАЙ 2Б: НЕ хватает до прихода → продали только после
+                    item_state[it["name"]] = max(0, item_arrival - item_plan_after)
             else:
-                # Нет прихода
+                # СЛУЧАЙ 3: Нет прихода
                 item_state[it["name"]] = max(0, item_balance_start - item_plan)
-        
-        # Проверка необходимости заказа
-        bf = future_bal(balance + arrive, pending, i, cycle_m, group, buffer)
-        containers = 0
-        order_kg = 0
-        if bf < total_plan * buffer:
-            need = total_plan * buffer - bf
-            containers = math.ceil(need / ckg)
-            order_kg = containers * ckg
-            pending[i + cycle_m] = pending.get(i + cycle_m, 0) + order_kg
         
         # Итоговый буфер группы ПОСЛЕ прихода
         gba = sum(bsi[it["name"]] + ia[it["name"]] for it in group["items"])
         gca = round(gba / tpi, 2) if tpi > 0 else 99
         
         # Сохраняем результаты месяца
-        in_tr = i in group["in_transit"] and group["in_transit"].get(i, 0) > 0
+        # Разделяем фиксированные и автоматические заказы
+        is_fixed = i in group["in_transit"] and group["in_transit"].get(i, 0) > 0
+        is_auto = i in auto_orders and auto_orders.get(i, 0) > 0
+        
+        # Пока не заполняем containers, order_kg, order_month
+        # Это будет сделано ПОСЛЕ цикла, идя от конца к началу
+        containers = 0
+        order_kg = 0
+        order_month = None
         
         results.append({
             "mi": i,
             "arrive": arrive,
-            "in_transit": in_tr,
+            "in_transit": is_fixed,      # Фиксированный приход
+            "is_auto_order": is_auto,    # Автоматический приход
             "containers": containers,
             "order_kg": order_kg,
+            "order_month": order_month,  # Месяц размещения заказа (i - cycle_m)
             "w_buf_before": w_buf_before,
             "w_buf_after": gca,
             "wl": wl,
@@ -449,29 +540,120 @@ def run_simulation(group: Dict) -> List[Dict]:
         })
         
         # Расчёт остатка на конец месяца с учётом недели прихода
-        # (balance_start уже определён выше перед циклом item_state)
         
         if balance_start >= tpi:
-            # СЛУЧАЙ 1: Товара хватало на весь месяц
-            # Продали полный план, приход добавляется в конце
+            # СЛУЧАЙ 1: Товара хватает на весь месяц
             balance = balance_start + arrive - tpi
+            
         elif arrive > 0:
-            # СЛУЧАЙ 2: Товара не хватало, ждали приход
-            # Продали остаток до прихода + пропорциональный план после прихода
-            
-            # Определяем день прихода по метке недели
+            # СЛУЧАЙ 2: Товара НЕ хватает на весь месяц, но есть приход
             arrival_day = get_arrival_day_from_week(wl)
-            
-            # Пропорциональный план после прихода
             plan_after_arrival = calculate_proportional_plan(tpi, arrival_day)
+            plan_before_arrival = tpi - plan_after_arrival
             
-            # Остаток = приход - план после прихода
-            # (остаток до прихода был израсходован полностью)
-            balance = max(0, arrive - plan_after_arrival)
+            if balance_start >= plan_before_arrival:
+                # ПОДСЛУЧАЙ 2А: Товара ХВАТАЕТ до прихода
+                balance = balance_start + arrive - tpi
+            else:
+                # ПОДСЛУЧАЙ 2Б: Товара НЕ ХВАТАЕТ до прихода
+                balance = max(0, arrive - plan_after_arrival)
         else:
             # СЛУЧАЙ 3: Нет прихода, товара не хватало
             balance = max(0, balance_start - tpi)
     
+    # НОВАЯ ЛОГИКА ЗАПОЛНЕНИЯ ЗАКАЗОВ:
+    # Идём от ПОСЛЕДНЕГО месяца к ПЕРВОМУ
+    # Если в месяце i есть приход → в месяце (i - cycle_m) был размещён заказ
+    for i in range(len(results) - 1, -1, -1):
+        if results[i]["arrive"] > 0:
+            # Есть приход в месяце i
+            order_placed_month = i - cycle_m
+            
+            if order_placed_month >= 0:
+                # Заказ был размещён в пределах горизонта
+                results[order_placed_month]["containers"] = 1
+                results[order_placed_month]["order_kg"] = ckg
+                results[order_placed_month]["order_month"] = i  # Приход будет в месяце i
+    
+    return results
+
+
+def run_simulation_with_auto_orders(group: Dict) -> List[Dict]:
+    """
+    Wrapper над run_simulation с автоматическим добавлением заказов
+    
+    ИТЕРАТИВНЫЙ ПОДХОД:
+    1. Запускаем симуляцию с фиксированными заказами
+    2. Проверяем каждый месяц: буфер < минимум и нет прихода?
+    3. Добавляем такие месяцы в auto_orders (НЕ in_transit!)
+    4. Повторяем пока не останется месяцев с низким буфером
+    """
+    # Определяем параметры группы
+    is_g4 = "часник" in group["name"].lower() or "чеснок" in group["name"].lower()
+    buffer_threshold = BUFFER_GROUP4 if is_g4 else BUFFER_DEFAULT
+    ckg = group["container"]
+    
+    # Копируем group чтобы не менять оригинал
+    group_copy = group.copy()
+    group_copy["in_transit"] = {k: v for k, v in group["in_transit"].items()}  # Фиксированные (не трогаем)
+    group_copy["auto_orders"] = {}  # Автоматические (добавляем сюда)
+    
+    max_iterations = 10
+    
+    for iteration in range(max_iterations):
+        # Запускаем симуляцию
+        results = run_simulation(group_copy)
+        
+        # Проверяем все месяцы
+        orders_added = False
+        added_months = []
+        
+        # Определяем cycle_m для проверки будущих приходов
+        cycle_m = math.ceil(group["cycle"] / 30)
+        
+        # ВАЖНО: Автоматические заказы можно добавлять только начиная с месяца
+        # где заказ ещё возможен (текущий момент + cycle_m)
+        # Месяц 0 = апрель 2026, но сейчас уже май 2026 (mi=1)
+        # Значит первый возможный автоматический приход: 1 + cycle_m
+        min_auto_month = 0 + cycle_m  # Упрощённо: считаем что "сейчас" это месяц 0
+        
+        for j in range(len(results)):
+            month_result = results[j]
+            
+            # 0. НОВАЯ ПРОВЕРКА: пропускаем месяцы где автоматический заказ невозможен
+            if j < min_auto_month:
+                continue  # Слишком рано для автоматического заказа
+            
+            # 1. Есть ли УЖЕ приход в этом месяце?
+            if month_result["in_transit"] or month_result.get("is_auto_order", False) or month_result["arrive"] > 0:
+                continue  # Приход есть → пропускаем
+            
+            # 2. Проверяем буфер на начало месяца
+            buf_before = month_result["w_buf_before"]
+            
+            # 3. Проверяем: есть ли уже приход в следующие cycle_m месяцев?
+            has_future_arrival = False
+            for future_month in range(j + 1, min(j + cycle_m + 1, len(results))):
+                if results[future_month]["arrive"] > 0:
+                    has_future_arrival = True
+                    break
+            
+            # 4. Добавляем заказ только если:
+            #    - Буфер низкий (< 1.0)
+            #    - И НЕТ прихода в ближайшие cycle_m месяцев
+            if buf_before < buffer_threshold and not has_future_arrival:
+                # Нужен приход в месяце j!
+                group_copy["auto_orders"][j] = ckg
+                orders_added = True
+                added_months.append(j)
+                # ВАЖНО: Добавляем только ОДИН заказ, потом пересчитываем!
+                break  # Выходим из цикла по месяцам
+        
+        # Если заказов не добавлено → готово!
+        if not orders_added:
+            break
+    
+    # Возвращаем финальные results
     return results
 
 
@@ -509,7 +691,7 @@ def run_all_simulations(groups: List[Dict]) -> Dict[str, List[Dict]]:
                 for i in range(18)
             ]
         else:
-            all_results[group["name"]] = run_simulation(group)
+            all_results[group["name"]] = run_simulation_with_auto_orders(group)
     return all_results
 
 
