@@ -158,42 +158,41 @@ with st.sidebar:
     
     st.divider()
     
-    # СОХРАНЕНИЕ/ЗАГРУЗКА СОСТОЯНИЯ
-    if user_role == "admin":
-        st.markdown("### 💾 Резервное копирование")
+    # СОХРАНЕНИЕ/ЗАГРУЗКА СОСТОЯНИЯ (для всех пользователей)
+    st.markdown("### 💾 Резервное копирование")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Экспорт состояния (доступно всем)
+        state_json = json.dumps({
+            "groups": st.session_state.groups,
+            "sales_plan_base": st.session_state.get("sales_plan_base", {}),
+            "sales_prices": st.session_state.get("sales_prices", {}),
+            "arrival_fixed_dates": {k: v.isoformat() if hasattr(v, 'isoformat') else str(v) 
+                                   for k, v in st.session_state.get("arrival_fixed_dates", {}).items()}
+        }, ensure_ascii=False, indent=2)
         
-        col1, col2 = st.columns(2)
+        st.download_button(
+            label="📥 Скачать состояние (JSON)",
+            data=state_json,
+            file_name="app_state_backup.json",
+            mime="application/json",
+            use_container_width=True,
+            help="Скачайте перед обновлением приложения"
+        )
+    
+    with col2:
+        # Импорт состояния (доступно всем)
+        uploaded_state = st.file_uploader(
+            "Загрузить состояние",
+            type=['json'],
+            key='state_upload',
+            label_visibility="collapsed",
+            help="Восстановить актуальные данные"
+        )
         
-        with col1:
-            # Экспорт состояния
-            state_json = json.dumps({
-                "groups": st.session_state.groups,
-                "sales_plan_base": st.session_state.get("sales_plan_base", {}),
-                "sales_prices": st.session_state.get("sales_prices", {}),
-                "arrival_fixed_dates": {k: v.isoformat() if hasattr(v, 'isoformat') else str(v) 
-                                       for k, v in st.session_state.get("arrival_fixed_dates", {}).items()}
-            }, ensure_ascii=False, indent=2)
-            
-            st.download_button(
-                label="📥 Скачать состояние (JSON)",
-                data=state_json,
-                file_name="app_state_backup.json",
-                mime="application/json",
-                use_container_width=True,
-                help="Скачайте перед обновлением приложения"
-            )
-        
-        with col2:
-            # Импорт состояния
-            uploaded_state = st.file_uploader(
-                "Загрузить состояние",
-                type=['json'],
-                key='state_upload',
-                label_visibility="collapsed",
-                help="Восстановить после обновления"
-            )
-            
-            if uploaded_state:
+        if uploaded_state:
                 try:
                     state_data = json.load(uploaded_state)
                     
@@ -278,8 +277,8 @@ with st.sidebar:
                         st.rerun()
                 except Exception as e:
                     st.error(f"❌ Ошибка загрузки: {e}")
-        
-        st.divider()
+    
+    st.divider()
     
     # УРОВЕНЬ 1: Выбор направления
     st.markdown("### 🎯 Направление")
