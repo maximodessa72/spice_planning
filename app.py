@@ -444,11 +444,20 @@ with st.sidebar:
     
     # УРОВЕНЬ 1: Выбор направления
     st.markdown("### 🎯 Направление")
-    direction = st.radio(
-        "Выберите направление:",
-        ["📦 Планирование закупок", "📊 Планирование продаж"],
-        label_visibility="collapsed"
-    )
+    
+    # Для специальных ролей фиксируем направление
+    if user_role == "operator":
+        direction = "📊 Планирование продаж"
+        st.info("👤 Оператор: Планирование продаж")
+    elif user_role == "ved_manager":
+        direction = "📦 Планирование закупок"
+        st.info("👤 Менеджер ВЭД: Планирование закупок")
+    else:
+        direction = st.radio(
+            "Выберите направление:",
+            ["📦 Планирование закупок", "📊 Планирование продаж"],
+            label_visibility="collapsed"
+        )
     
     st.divider()
     

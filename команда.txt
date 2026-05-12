@@ -14,7 +14,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "пересчет остатков закупки и продажи"
+git commit -m "новые роли"
 git push
 
 [passwords]
