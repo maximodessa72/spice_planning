@@ -320,125 +320,126 @@ with st.sidebar:
     
     st.divider()
     
-    # СОХРАНЕНИЕ/ЗАГРУЗКА СОСТОЯНИЯ (для всех пользователей)
-    st.markdown("### 💾 Резервное копирование")
+    # СОХРАНЕНИЕ/ЗАГРУЗКА СОСТОЯНИЯ (только для admin)
+    if user_role == "admin":
+        st.markdown("### 💾 Резервное копирование")
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Экспорт состояния (доступно всем)
-        state_json = json.dumps({
-            "groups": st.session_state.groups,
-            "sales_plan_base": st.session_state.get("sales_plan_base", {}),
-            "sales_prices": st.session_state.get("sales_prices", {}),
-            "arrival_fixed_dates": {k: v.isoformat() if hasattr(v, 'isoformat') else str(v) 
-                                   for k, v in st.session_state.get("arrival_fixed_dates", {}).items()}
-        }, ensure_ascii=False, indent=2)
+        col1, col2 = st.columns(2)
         
-        st.download_button(
-            label="📥 Скачать состояние (JSON)",
-            data=state_json,
-            file_name="app_state_backup.json",
-            mime="application/json",
-            use_container_width=True,
-            help="Скачайте перед обновлением приложения"
-        )
-    
-    with col2:
-        # Импорт состояния (доступно всем)
-        uploaded_state = st.file_uploader(
-            "Загрузить состояние",
-            type=['json'],
-            key='state_upload',
-            label_visibility="collapsed",
-            help="Восстановить актуальные данные"
-        )
+        with col1:
+            # Экспорт состояния (доступно всем)
+            state_json = json.dumps({
+                "groups": st.session_state.groups,
+                "sales_plan_base": st.session_state.get("sales_plan_base", {}),
+                "sales_prices": st.session_state.get("sales_prices", {}),
+                "arrival_fixed_dates": {k: v.isoformat() if hasattr(v, 'isoformat') else str(v) 
+                                       for k, v in st.session_state.get("arrival_fixed_dates", {}).items()}
+            }, ensure_ascii=False, indent=2)
+            
+            st.download_button(
+                label="📥 Скачать состояние (JSON)",
+                data=state_json,
+                file_name="app_state_backup.json",
+                mime="application/json",
+                use_container_width=True,
+                help="Скачайте перед обновлением приложения"
+            )
         
-        if uploaded_state:
-                try:
-                    state_data = json.load(uploaded_state)
-                    
-                    if st.button("✅ Восстановить состояние", type="primary", use_container_width=True):
-                        # Восстанавливаем данные
-                        groups = state_data.get("groups", GROUPS)
+        with col2:
+            # Импорт состояния (доступно всем)
+            uploaded_state = st.file_uploader(
+                "Загрузить состояние",
+                type=['json'],
+                key='state_upload',
+                label_visibility="collapsed",
+                help="Восстановить актуальные данные"
+            )
+            
+            if uploaded_state:
+                    try:
+                        state_data = json.load(uploaded_state)
                         
-                        # Исправляем plan_override для сезонных позиций (из dict в list)
-                        for group in groups:
-                            # Конвертируем ключи in_transit в int
-                            if "in_transit" in group:
-                                group["in_transit"] = {int(k): v for k, v in group["in_transit"].items()}
-                            if "week_arrival" in group:
-                                group["week_arrival"] = {int(k): v for k, v in group["week_arrival"].items()}
+                        if st.button("✅ Восстановить состояние", type="primary", use_container_width=True):
+                            # Восстанавливаем данные
+                            groups = state_data.get("groups", GROUPS)
                             
-                            for item in group.get("items", []):
+                            # Исправляем plan_override для сезонных позиций (из dict в list)
+                            for group in groups:
                                 # Конвертируем ключи in_transit в int
-                                if "in_transit" in item:
-                                    item["in_transit"] = {int(k): v for k, v in item["in_transit"].items()}
+                                if "in_transit" in group:
+                                    group["in_transit"] = {int(k): v for k, v in group["in_transit"].items()}
+                                if "week_arrival" in group:
+                                    group["week_arrival"] = {int(k): v for k, v in group["week_arrival"].items()}
                                 
-                                # Исправляем plan_override для сезонных
-                                if item.get("seasonal") and "plan_override" in item:
-                                    po = item["plan_override"]
-                                    if isinstance(po, dict):
-                                        # Конвертируем {0: val, 1: val, ...} в [val, val, ...]
-                                        item["plan_override"] = [po[str(i)] if str(i) in po else po.get(i, 0) for i in range(12)]
-                        
-                        st.session_state.groups = groups
-                        
-                        # Конвертируем ключи в sales_plan_base {group_idx: {item_idx: {month_idx: value}}}
-                        sales_plan = state_data.get("sales_plan_base", {})
-                        if sales_plan:
-                            converted_plan = {}
-                            for group_key, items in sales_plan.items():
-                                group_idx = int(group_key)
-                                converted_plan[group_idx] = {}
-                                if isinstance(items, dict):
-                                    for item_key, months in items.items():
-                                        item_idx = int(item_key)
-                                        if isinstance(months, dict):
-                                            converted_plan[group_idx][item_idx] = {int(k): v for k, v in months.items()}
-                                        else:
-                                            converted_plan[group_idx][item_idx] = months
-                            st.session_state.sales_plan_base = converted_plan
-                        else:
-                            st.session_state.sales_plan_base = {}
-                        
-                        # Конвертируем ключи в sales_prices {group_idx: {item_idx: price}}
-                        sales_prices = state_data.get("sales_prices", {})
-                        if sales_prices:
-                            converted_prices = {}
-                            for group_key, items in sales_prices.items():
-                                group_idx = int(group_key)
-                                converted_prices[group_idx] = {}
-                                if isinstance(items, dict):
-                                    for item_key, price in items.items():
-                                        item_idx = int(item_key)
-                                        converted_prices[group_idx][item_idx] = price
-                            st.session_state.sales_prices = converted_prices
-                        else:
-                            st.session_state.sales_prices = {}
-                        
-                        # Загружаем даты прихода
-                        from datetime import datetime
-                        arrival_dates = state_data.get("arrival_fixed_dates", {})
-                        if arrival_dates:
-                            converted_dates = {}
-                            for group_name, date_str in arrival_dates.items():
-                                try:
-                                    converted_dates[group_name] = datetime.fromisoformat(date_str)
-                                except:
-                                    pass
-                            st.session_state.arrival_fixed_dates = converted_dates
-                        else:
-                            st.session_state.arrival_fixed_dates = {}
-                        
-                        st.session_state.results = None
-                        st.session_state.need_recalc = True
-                        
-                        st.success("✅ Состояние восстановлено!")
-                        st.balloons()
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Ошибка загрузки: {e}")
+                                for item in group.get("items", []):
+                                    # Конвертируем ключи in_transit в int
+                                    if "in_transit" in item:
+                                        item["in_transit"] = {int(k): v for k, v in item["in_transit"].items()}
+                                    
+                                    # Исправляем plan_override для сезонных
+                                    if item.get("seasonal") and "plan_override" in item:
+                                        po = item["plan_override"]
+                                        if isinstance(po, dict):
+                                            # Конвертируем {0: val, 1: val, ...} в [val, val, ...]
+                                            item["plan_override"] = [po[str(i)] if str(i) in po else po.get(i, 0) for i in range(12)]
+                            
+                            st.session_state.groups = groups
+                            
+                            # Конвертируем ключи в sales_plan_base {group_idx: {item_idx: {month_idx: value}}}
+                            sales_plan = state_data.get("sales_plan_base", {})
+                            if sales_plan:
+                                converted_plan = {}
+                                for group_key, items in sales_plan.items():
+                                    group_idx = int(group_key)
+                                    converted_plan[group_idx] = {}
+                                    if isinstance(items, dict):
+                                        for item_key, months in items.items():
+                                            item_idx = int(item_key)
+                                            if isinstance(months, dict):
+                                                converted_plan[group_idx][item_idx] = {int(k): v for k, v in months.items()}
+                                            else:
+                                                converted_plan[group_idx][item_idx] = months
+                                st.session_state.sales_plan_base = converted_plan
+                            else:
+                                st.session_state.sales_plan_base = {}
+                            
+                            # Конвертируем ключи в sales_prices {group_idx: {item_idx: price}}
+                            sales_prices = state_data.get("sales_prices", {})
+                            if sales_prices:
+                                converted_prices = {}
+                                for group_key, items in sales_prices.items():
+                                    group_idx = int(group_key)
+                                    converted_prices[group_idx] = {}
+                                    if isinstance(items, dict):
+                                        for item_key, price in items.items():
+                                            item_idx = int(item_key)
+                                            converted_prices[group_idx][item_idx] = price
+                                st.session_state.sales_prices = converted_prices
+                            else:
+                                st.session_state.sales_prices = {}
+                            
+                            # Загружаем даты прихода
+                            from datetime import datetime
+                            arrival_dates = state_data.get("arrival_fixed_dates", {})
+                            if arrival_dates:
+                                converted_dates = {}
+                                for group_name, date_str in arrival_dates.items():
+                                    try:
+                                        converted_dates[group_name] = datetime.fromisoformat(date_str)
+                                    except:
+                                        pass
+                                st.session_state.arrival_fixed_dates = converted_dates
+                            else:
+                                st.session_state.arrival_fixed_dates = {}
+                            
+                            st.session_state.results = None
+                            st.session_state.need_recalc = True
+                            
+                            st.success("✅ Состояние восстановлено!")
+                            st.balloons()
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Ошибка загрузки: {e}")
     
     st.divider()
     
