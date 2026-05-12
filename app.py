@@ -3068,10 +3068,16 @@ elif page == "✅ Фиксация даты прихода заказа":
         st.warning("⚠️ Фиксация дат доступна только администраторам и операторам")
         st.stop()
     
-    # Проверяем что симуляция выполнена
+    # Проверяем что симуляция выполнена (для operator делаем автоматически)
     if st.session_state.results is None:
-        st.warning("⚠️ Сначала выполните пересчёт закупок")
-        st.stop()
+        if user_role == "operator":
+            with st.spinner('Загрузка данных...'):
+                st.session_state.results = run_all_simulations(st.session_state.groups)
+                save_state_to_db()
+                st.session_state.need_recalc = False
+        else:
+            st.warning("⚠️ Сначала выполните пересчёт закупок")
+            st.stop()
     
     # Инициализация хранилища дат
     if "arrival_fixed_dates" not in st.session_state:
