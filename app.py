@@ -126,6 +126,20 @@ def check_password():
             del st.session_state["password"]
             return
         
+        # Проверяем operator пароль
+        if entered_password == st.secrets["passwords"].get("operator", ""):
+            st.session_state["password_correct"] = True
+            st.session_state["user_role"] = "operator"
+            del st.session_state["password"]
+            return
+        
+        # Проверяем ved_manager пароль
+        if entered_password == st.secrets["passwords"].get("ved_manager", ""):
+            st.session_state["password_correct"] = True
+            st.session_state["user_role"] = "ved_manager"
+            del st.session_state["password"]
+            return
+        
         # Пароль неверный
         st.session_state["password_correct"] = False
         st.session_state["user_role"] = None
@@ -441,33 +455,45 @@ with st.sidebar:
     # УРОВЕНЬ 2: Выбор страницы в зависимости от направления
     if direction == "📦 Планирование закупок":
         st.markdown("### 📄 Страница")
-        page = st.radio(
-            "Выберите страницу:",
-            [
-                "🏠 Главная",
-                "📥 Импорт данных по закупкам",
-                "✅ Подтверждение заказов",
-                "⚙️ Управление группами",
-                "📊 Редактор данных",
-                "📈 Аналитика по закупкам",
-                "📅 Календарь заказов",
-                "🚚 Календарь поставок",
-                "🌱 Сезоны урожаев"
-            ],
-            label_visibility="collapsed"
-        )
+        
+        # Для ved_manager показываем только Подтверждение заказов
+        if user_role == "ved_manager":
+            page = "✅ Подтверждение заказов"
+            st.info("👤 Менеджер ВЭД: доступно только подтверждение заказов")
+        else:
+            page = st.radio(
+                "Выберите страницу:",
+                [
+                    "🏠 Главная",
+                    "📥 Импорт данных по закупкам",
+                    "✅ Подтверждение заказов",
+                    "⚙️ Управление группами",
+                    "📊 Редактор данных",
+                    "📈 Аналитика по закупкам",
+                    "📅 Календарь заказов",
+                    "🚚 Календарь поставок",
+                    "🌱 Сезоны урожаев"
+                ],
+                label_visibility="collapsed"
+            )
     else:  # Планирование продаж
         st.markdown("### 📄 Страница")
-        page = st.radio(
-            "Выберите страницу:",
-            [
-                "🏠 Главная (продажи)",
-                "📥 Импорт данных по продажам",
-                "✅ Фиксация даты прихода заказа",
-                "📈 Аналитика по продажам"
-            ],
-            label_visibility="collapsed"
-        )
+        
+        # Для operator показываем только фиксацию дат
+        if user_role == "operator":
+            page = "✅ Фиксация даты прихода заказа"
+            st.info("👤 Оператор: доступна только фиксация дат")
+        else:
+            page = st.radio(
+                "Выберите страницу:",
+                [
+                    "🏠 Главная (продажи)",
+                    "📥 Импорт данных по продажам",
+                    "✅ Фиксация даты прихода заказа",
+                    "📈 Аналитика по продажам"
+                ],
+                label_visibility="collapsed"
+            )
     
     st.divider()
     
@@ -3029,8 +3055,8 @@ elif page == "✅ Фиксация даты прихода заказа":
     
     # Проверка прав доступа
     user_role = st.session_state.get("user_role", "viewer")
-    if user_role != "admin":
-        st.warning("⚠️ Фиксация дат доступна только администраторам")
+    if user_role not in ["admin", "operator"]:
+        st.warning("⚠️ Фиксация дат доступна только администраторам и операторам")
         st.stop()
     
     # Проверяем что симуляция выполнена
