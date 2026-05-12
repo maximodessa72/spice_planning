@@ -15,6 +15,86 @@ from simulation import (
     get_plan
 )
 
+# ========== АВТОСОХРАНЕНИЕ POSTGRESQL ==========
+def get_db_connection():
+    """Подключение к PostgreSQL"""
+    try:
+        import psycopg2
+        from psycopg2.extras import Json
+        
+        db_url = st.secrets.get("postgres", {}).get("url")
+        if not db_url:
+            return None
+        
+        conn = psycopg2.connect(db_url)
+        return conn
+    except Exception as e:
+        st.error(f"Ошибка подключения к БД: {e}")
+        return None
+
+def save_state_to_db():
+    """Сохранение состояния в PostgreSQL"""
+    conn = get_db_connection()
+    if not conn:
+        return
+    
+    try:
+        cur = conn.cursor()
+        
+        # Создаём таблицу если нет
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS app_state (
+                id INTEGER PRIMARY KEY DEFAULT 1,
+                state_data JSONB NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        
+        state_data = {
+            "groups": st.session_state.groups,
+            "sales_plan_base": st.session_state.get("sales_plan_base", {}),
+            "sales_prices": st.session_state.get("sales_prices", {}),
+            "arrival_fixed_dates": {k: v.isoformat() if hasattr(v, 'isoformat') else str(v) 
+                                   for k, v in st.session_state.get("arrival_fixed_dates", {}).items()}
+        }
+        
+        # Upsert
+        cur.execute("""
+            INSERT INTO app_state (id, state_data, updated_at)
+            VALUES (1, %s, NOW())
+            ON CONFLICT (id) 
+            DO UPDATE SET state_data = %s, updated_at = NOW()
+        """, (json.dumps(state_data), json.dumps(state_data)))
+        
+        conn.commit()
+    except Exception as e:
+        st.error(f"Ошибка сохранения: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+def load_state_from_db():
+    """Загрузка состояния из PostgreSQL"""
+    conn = get_db_connection()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT state_data FROM app_state WHERE id = 1")
+        result = cur.fetchone()
+        
+        if result:
+            return result[0]
+    except Exception as e:
+        # Таблица ещё не создана - норм
+        pass
+    finally:
+        if conn:
+            conn.close()
+    
+    return None
+
 # Настройка страницы
 st.set_page_config(
     page_title="Система планирования закупок",
@@ -103,8 +183,75 @@ def cleanup_old_confirmed_orders():
 
 # Инициализация session state
 if 'groups' not in st.session_state:
-    cleanup_old_confirmed_orders()
-    st.session_state.groups = GROUPS
+    # Пытаемся загрузить из БД
+    loaded_state = load_state_from_db()
+    if loaded_state:
+        # Обработка как при JSON импорте
+        groups = loaded_state.get("groups", GROUPS)
+        
+        for group in groups:
+            if "in_transit" in group:
+                group["in_transit"] = {int(k): v for k, v in group["in_transit"].items()}
+            if "week_arrival" in group:
+                group["week_arrival"] = {int(k): v for k, v in group["week_arrival"].items()}
+            
+            for item in group.get("items", []):
+                if "in_transit" in item:
+                    item["in_transit"] = {int(k): v for k, v in item["in_transit"].items()}
+                if item.get("seasonal") and "plan_override" in item:
+                    po = item["plan_override"]
+                    if isinstance(po, dict):
+                        item["plan_override"] = [po[str(i)] if str(i) in po else po.get(i, 0) for i in range(12)]
+        
+        st.session_state.groups = groups
+        
+        # Sales данные
+        sales_plan = loaded_state.get("sales_plan_base", {})
+        if sales_plan:
+            converted_plan = {}
+            for group_key, items in sales_plan.items():
+                group_idx = int(group_key)
+                converted_plan[group_idx] = {}
+                if isinstance(items, dict):
+                    for item_key, months in items.items():
+                        item_idx = int(item_key)
+                        if isinstance(months, dict):
+                            converted_plan[group_idx][item_idx] = {int(k): v for k, v in months.items()}
+                        else:
+                            converted_plan[group_idx][item_idx] = months
+            st.session_state.sales_plan_base = converted_plan
+        else:
+            st.session_state.sales_plan_base = {}
+        
+        sales_prices = loaded_state.get("sales_prices", {})
+        if sales_prices:
+            converted_prices = {}
+            for group_key, items in sales_prices.items():
+                group_idx = int(group_key)
+                converted_prices[group_idx] = {}
+                if isinstance(items, dict):
+                    for item_key, price in items.items():
+                        item_idx = int(item_key)
+                        converted_prices[group_idx][item_idx] = price
+            st.session_state.sales_prices = converted_prices
+        else:
+            st.session_state.sales_prices = {}
+        
+        from datetime import datetime
+        arrival_dates = loaded_state.get("arrival_fixed_dates", {})
+        if arrival_dates:
+            converted_dates = {}
+            for group_name, date_str in arrival_dates.items():
+                try:
+                    converted_dates[group_name] = datetime.fromisoformat(date_str)
+                except:
+                    pass
+            st.session_state.arrival_fixed_dates = converted_dates
+        else:
+            st.session_state.arrival_fixed_dates = {}
+    else:
+        cleanup_old_confirmed_orders()
+        st.session_state.groups = GROUPS
 if 'sales_plan_base' not in st.session_state:
     st.session_state.sales_plan_base = {}
 if 'sales_prices' not in st.session_state:
@@ -142,6 +289,7 @@ def recalculate():
     """Пересчитать симуляцию"""
     with st.spinner('Пересчёт симуляции...'):
         st.session_state.results = run_all_simulations(st.session_state.groups)
+        save_state_to_db()
         st.session_state.need_recalc = False
 
 
@@ -814,6 +962,7 @@ elif page == "📥 Импорт данных по закупкам":
                                     
                                     # Пересчёт
                                     st.session_state.results = run_all_simulations(st.session_state.groups)
+                                    save_state_to_db()
                                     st.session_state.need_recalc = False
                                     
                                     st.success("✅ Остатки обновлены и пересчитаны!")
@@ -963,6 +1112,7 @@ elif page == "📥 Импорт данных по закупкам":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
+                            save_state_to_db()
                             st.session_state.need_recalc = False
                             
                             st.success("✅ Планы обновлены и пересчитаны!")
@@ -994,6 +1144,7 @@ elif page == "✅ Подтверждение заказов":
     if st.session_state.need_recalc or st.session_state.results is None:
         with st.spinner('Пересчёт...'):
             st.session_state.results = run_all_simulations(st.session_state.groups)
+            save_state_to_db()
             st.session_state.need_recalc = False
     
     results = st.session_state.results
@@ -1158,6 +1309,7 @@ elif page == "✅ Подтверждение заказов":
                     
                     # Пересчёт
                     st.session_state.results = run_all_simulations(st.session_state.groups)
+                    save_state_to_db()
                     st.session_state.need_recalc = False
                     
                     # Очищаем временные данные
@@ -1323,6 +1475,7 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
+                            save_state_to_db()
                             st.session_state.need_recalc = False
                             
                             st.success(f"✅ Заказ перемещён: {order['Месяц прихода']} → {get_month_label(new_mi)}")
@@ -1355,6 +1508,7 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
+                            save_state_to_db()
                             st.session_state.need_recalc = False
                             
                             st.success(f"✅ Заказ перемещён: {order['Месяц прихода']} → {get_month_label(new_mi)}")
@@ -1392,6 +1546,7 @@ elif page == "✅ Подтверждение заказов":
                             
                             # Пересчёт
                             st.session_state.results = run_all_simulations(st.session_state.groups)
+                            save_state_to_db()
                             st.session_state.need_recalc = False
                             
                             st.success("✅ Заказ полностью удалён!")
@@ -1514,6 +1669,7 @@ elif page == "✅ Подтверждение заказов":
                     
                     # Пересчёт
                     st.session_state.results = run_all_simulations(st.session_state.groups)
+                    save_state_to_db()
                     st.session_state.need_recalc = False
                     
                     # Закрываем форму редактирования
@@ -3070,6 +3226,7 @@ elif page == "✅ Фиксация даты прихода заказа":
             
             # КРИТИЧНО: Пересчитываем симуляцию после изменения
             st.session_state.results = run_all_simulations(st.session_state.groups)
+            save_state_to_db()
             st.session_state.need_recalc = False
             
             # Отладка

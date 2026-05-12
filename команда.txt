@@ -20,3 +20,8 @@ git push
 [passwords]
    viewer = "viewer2026"
    admin = "admin2026"
+
+supabase.com
+ghjtrn spice-planning 
+H1979m1979M!
+postgresql://postgres.yavukrsxtcjxcqtbdxmz:[H1979m1979M!]@aws-1-eu-west-3.pooler.supabase.com:6543/postgres
