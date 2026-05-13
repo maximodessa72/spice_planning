@@ -14,12 +14,14 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "новые роли"
+git commit -m "новые роли обновление 3"
 git push
 
 [passwords]
-   viewer = "viewer2026"
-   admin = "admin2026"
+viewer = "viewer2026"
+admin = "admin2026"
+operator = "operator2026"
+ved_manager = "ved2026"
 
 supabase.com
 ghjtrn spice-planning 

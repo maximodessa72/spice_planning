@@ -937,9 +937,9 @@ def create_sales_excel(procurement_results: Dict[str, List[Dict]],
             cell.value = ""
             cell.border = bd
         
-        # 6. План продаж, грн = 1850000
+        # 6. План продаж, грн = 4850000
         cell = ws.cell(row=data_row, column=col + 5)
-        cell.value = 1850000
+        cell.value = 4850000
         cell.number_format = '#,##0'
         cell.font = Font(name='Arial', bold=True, size=9, color='000000')
         cell.alignment = Alignment(horizontal='center', vertical='center')
@@ -1065,7 +1065,7 @@ def create_sales_excel(procurement_results: Dict[str, List[Dict]],
         if import_value == "—" or import_value is None:
             import_value = 0
         
-        total_all = import_value + 1850000 + 1900000 + 2000000
+        total_all = import_value + 4850000 + 1900000 + 2000000
         
         cell = ws.cell(row=data_row, column=col + 5)
         cell.value = round(total_all)
