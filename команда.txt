@@ -14,7 +14,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "новые роли обновление 3"
+git commit -m "hfc[jls 4800000"
 git push
 
 [passwords]

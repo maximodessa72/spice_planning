@@ -521,7 +521,10 @@ with st.sidebar:
     
     # Кнопка экспорта (зависит от направления)
     if direction == "📦 Планирование закупок":
-        if st.button("💾 Экспорт закупок", use_container_width=True):
+        # Блокируем для ved_manager
+        if user_role == "ved_manager":
+            st.info("👤 Экспорт недоступен для вашей роли")
+        elif st.button("💾 Экспорт закупок", use_container_width=True):
             try:
                 from excel_export import create_excel
                 import tempfile
@@ -566,64 +569,68 @@ with st.sidebar:
             )
     
     else:  # Планирование продаж
-        # Проверяем что есть импортированные данные
-        has_prices = len(st.session_state.get("sales_prices", {})) > 0
-        has_plan = len(st.session_state.get("sales_plan_base", {})) > 0
-        
-        if not has_prices or not has_plan:
-            st.warning("⚠️ Сначала импортируйте данные")
-            st.caption("Перейдите в раздел 'Импорт данных по продажам'")
+        # Блокируем для operator
+        if user_role == "operator":
+            st.info("👤 Экспорт недоступен для вашей роли")
         else:
-            if st.button("💾 Экспорт продаж", use_container_width=True):
-                try:
-                    from sales_export import create_sales_excel
-                    import tempfile
-                    import os
-                    
-                    # Проверяем что симуляция закупок выполнена
-                    if st.session_state.results is None:
-                        recalculate()
-                    
-                    # Создаём файл во временной директории
-                    with st.spinner('Создание Excel файла продаж...'):
-                        # Используем временный файл
-                        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-                            output_path = tmp.name
-                        
-                        create_sales_excel(
-                            procurement_results=st.session_state.results,
-                            groups=st.session_state.groups,
-                            sales_prices=st.session_state.get("sales_prices", {}),
-                            sales_plan_base=st.session_state.get("sales_plan_base", {}),
-                            sales_fact=st.session_state.get("sales_fact", {}),
-                            arrival_fixed_dates=st.session_state.get("arrival_fixed_dates", {}),
-                            filename=output_path
-                        )
-                        
-                        # Читаем файл в память
-                        with open(output_path, 'rb') as f:
-                            st.session_state.sales_excel_file = f.read()
-                        
-                        # Удаляем временный файл
+            # Проверяем что есть импортированные данные
+            has_prices = len(st.session_state.get("sales_prices", {})) > 0
+            has_plan = len(st.session_state.get("sales_plan_base", {})) > 0
+            
+            if not has_prices or not has_plan:
+                    st.warning("⚠️ Сначала импортируйте данные")
+                    st.caption("Перейдите в раздел 'Импорт данных по продажам'")
+            else:
+                    if st.button("💾 Экспорт продаж", use_container_width=True):
                         try:
-                            os.unlink(output_path)
-                        except:
-                            pass
-                    
-                    st.success("✅ Excel файл продаж создан!")
-                except Exception as e:
-                    st.error(f"❌ Ошибка при создании файла: {str(e)}")
-                    import traceback
-                    st.code(traceback.format_exc())
+                            from sales_export import create_sales_excel
+                            import tempfile
+                            import os
+                            
+                            # Проверяем что симуляция закупок выполнена
+                            if st.session_state.results is None:
+                                recalculate()
+                            
+                            # Создаём файл во временной директории
+                            with st.spinner('Создание Excel файла продаж...'):
+                                # Используем временный файл
+                                with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+                                    output_path = tmp.name
+                                
+                                create_sales_excel(
+                                    procurement_results=st.session_state.results,
+                                    groups=st.session_state.groups,
+                                    sales_prices=st.session_state.get("sales_prices", {}),
+                                    sales_plan_base=st.session_state.get("sales_plan_base", {}),
+                                    sales_fact=st.session_state.get("sales_fact", {}),
+                                    arrival_fixed_dates=st.session_state.get("arrival_fixed_dates", {}),
+                                    filename=output_path
+                                )
+                                
+                                # Читаем файл в память
+                                with open(output_path, 'rb') as f:
+                                    st.session_state.sales_excel_file = f.read()
+                                
+                                # Удаляем временный файл
+                                try:
+                                    os.unlink(output_path)
+                                except:
+                                    pass
+                            
+                            st.success("✅ Excel файл продаж создан!")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка при создании файла: {str(e)}")
+                            import traceback
+                            st.code(traceback.format_exc())
             
             # Кнопка скачивания (отдельно, чтобы работала после перезагрузки)
             if st.session_state.get("sales_excel_file") is not None:
-                st.download_button(
-                    label="📥 Скачать план_продаж.xlsx",
-                    data=st.session_state.sales_excel_file,
-                    file_name="план_продаж.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
+                        st.download_button(
+                            label="📥 Скачать план_продаж.xlsx",
+                            data=st.session_state.sales_excel_file,
+                            file_name="план_продаж.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
                 )
 
 
