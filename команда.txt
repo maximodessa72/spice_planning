@@ -1,4 +1,5 @@
 https://spiceplanning.streamlit.app/
+https://share.streamlit.io/
 
 streamlit run app.py
 
@@ -14,7 +15,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "hfc[jls 4800000"
+git commit -m "закрыть экспорт"
 git push
 
 [passwords]

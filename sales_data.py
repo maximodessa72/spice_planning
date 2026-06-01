@@ -133,6 +133,10 @@ def import_sales_plan_from_excel(filepath: str) -> Dict:
                 continue
             
             # Сохраняем план
+            try:
+                plan_kg = int(float(str(plan_kg).replace(',', '.').strip())) if plan_kg is not None else None
+            except (ValueError, TypeError):
+                plan_kg = None
             if plan_kg is not None and plan_kg > 0:
                 if current_group_idx not in plans:
                     plans[current_group_idx] = {}
