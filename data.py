@@ -2,8 +2,6 @@
 Данные для системы планирования закупок
 """
 
-from datetime import datetime
-
 # Сезонные планы
 KARDAMON_SEASONAL = {0: 50, 1: 50, 2: 0, 3: 302, 4: 199, 5: 484, 6: 458, 7: 202, 8: 111, 9: 400, 10: 150, 11: 130}
 PDG_SEASONAL = {0: 3200, 1: 3200, 2: 3200, 3: 3200, 4: 3200, 5: 4500, 6: 7000, 7: 3200, 8: 3200, 9: 3200, 10: 3200, 11: 3200}
@@ -14,27 +12,11 @@ BUFFER_GROUP4 = 1.2   # Минимальный буфер для чеснока
 BAG = 25
 N_MONTHS = 12  # Планирование на 12 месяцев вперёд
 
-# АВТООПРЕДЕЛЕНИЕ текущего месяца (для закупок)
-_current_date = datetime.now()
-BASE_YEAR = _current_date.year
-BASE_MONTH = _current_date.month  # Текущий месяц (май)
-
-def get_current_start_month():
-    """
-    Получить индекс стартового месяца для текущей даты
-    Возвращает количество месяцев от базовой даты
-    """
-    now = datetime.now()
-    current_year = now.year
-    current_month = now.month
-    
-    # Вычисляем разницу в месяцах от базовой даты
-    months_diff = (current_year - BASE_YEAR) * 12 + (current_month - BASE_MONTH)
-    
-    return max(0, months_diff)  # Не может быть отрицательным
-
-# Текущий стартовый месяц (динамически вычисляется)
-CURRENT_START_MONTH = get_current_start_month()
+# mi=0 всегда означает "текущий календарный месяц" — вся симуляция
+# (buffer/auto_orders в simulation.py) это и так предполагает.
+# Реальная дата для подписей месяцев берётся напрямую в get_month_label()
+# в app.py (через datetime.now()), без кэширования на уровне модуля.
+CURRENT_START_MONTH = 0
 
 # Все группы товаров
 GROUPS = [

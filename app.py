@@ -284,17 +284,14 @@ def format_number(num):
 
 
 def get_month_label(mi):
-    """Получить название месяца по индексу с учётом текущего стартового месяца"""
-    from data import BASE_YEAR, BASE_MONTH, CURRENT_START_MONTH
-    
+    """Получить название месяца по индексу. mi=0 = текущий календарный месяц.
+    Дата берётся напрямую при каждом вызове (без кэша) — подписи всегда актуальны."""
+    from datetime import datetime
+    now = datetime.now()
     months = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек']
     
-    # Добавляем сдвиг от текущего стартового месяца
-    absolute_month = CURRENT_START_MONTH + mi
-    
-    # Вычисляем год и месяц
-    y = BASE_YEAR + (BASE_MONTH - 1 + absolute_month) // 12
-    m = (BASE_MONTH - 1 + absolute_month) % 12
+    y = now.year + (now.month - 1 + mi) // 12
+    m = (now.month - 1 + mi) % 12
     
     return f"{months[m]} {y}"
 
