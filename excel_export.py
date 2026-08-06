@@ -10,14 +10,15 @@ from openpyxl.utils import get_column_letter
 from typing import Dict, List
 from datetime import datetime
 from simulation import get_plan  # Для определения плана позиции в месяце
-from data import BASE_YEAR, BASE_MONTH, N_MONTHS  # Импортируем константы
+from data import N_MONTHS, get_current_year_month  # get_current_year_month() — свежая дата при каждом вызове
 
 
 def get_month_label(mi: int) -> str:
-    """Получить название месяца по индексу"""
+    """Получить название месяца по индексу. Дата берётся напрямую при каждом вызове."""
     months = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-    y = BASE_YEAR + (BASE_MONTH - 1 + mi) // 12
-    m = (BASE_MONTH - 1 + mi) % 12
+    base_year, base_month = get_current_year_month()
+    y = base_year + (base_month - 1 + mi) // 12
+    m = (base_month - 1 + mi) % 12
     return f"{months[m]} {y}"
 
 
