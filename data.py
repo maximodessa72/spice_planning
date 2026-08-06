@@ -14,9 +14,22 @@ N_MONTHS = 12  # Планирование на 12 месяцев вперёд
 
 # mi=0 всегда означает "текущий календарный месяц" — вся симуляция
 # (buffer/auto_orders в simulation.py) это и так предполагает.
-# Реальная дата для подписей месяцев берётся напрямую в get_month_label()
-# в app.py (через datetime.now()), без кэширования на уровне модуля.
 CURRENT_START_MONTH = 0
+
+# BASE_YEAR/BASE_MONTH оставлены для обратной совместимости с excel_export.py
+# (вычисляются при каждом импорте модуля — на Streamlit Cloud модуль
+# переимпортируется при каждом рестарте/деплое, так что для экспорта в Excel,
+# который обычно делают вскоре после захода в приложение, это ок).
+# Для подписей месяцев в самом интерфейсе (app.py) используется get_current_year_month()
+# ниже — она даёт свежую дату при КАЖДОМ вызове, без кэширования.
+from datetime import datetime as _datetime
+BASE_YEAR = _datetime.now().year
+BASE_MONTH = _datetime.now().month
+
+def get_current_year_month():
+    """Всегда свежие (год, месяц) на момент вызова — без кэширования"""
+    now = _datetime.now()
+    return now.year, now.month
 
 # Все группы товаров
 GROUPS = [
