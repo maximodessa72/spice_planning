@@ -187,11 +187,15 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
         is_active = group.get("active", True)
         
         # "Требует решения" — preview-рекомендации (не влияют на расчёт, см. simulation.py)
-        # Список эскалаций за весь горизонт -> словарь {месяц показа: рекомендация}
-        bottleneck_recs_by_mi = {}
+        # Список эскалаций за весь горизонт -> два словаря:
+        #   by_placement_mi — месяц, где пишем ТОЛЬКО текст "требует решения" (пора решать)
+        #   by_target_mi    — месяц дефицита, где показываем ЦИФРЫ (что случится, если заказать)
+        bottleneck_by_placement_mi = {}
+        bottleneck_by_target_mi = {}
         if is_active:
             for rec in get_bottleneck_recommendations(group, group_results):
-                bottleneck_recs_by_mi[rec["mi"]] = rec
+                bottleneck_by_placement_mi[rec["mi"]] = rec
+                bottleneck_by_target_mi[rec["target_mi"]] = rec
         
         # СТРОКА ГРУППЫ
         # Колонка A - название группы
@@ -429,11 +433,18 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
             for mi in range(N_MONTHS):
                 r = group_results[mi]
                 
-                # "Требует решения" — эта позиция в этом месяце попала в preview-рекомендацию?
-                rec_this_month = bottleneck_recs_by_mi.get(mi)
-                is_rec = (
-                    rec_this_month is not None
-                    and rec_this_month["order_kg"].get(item["name"], 0) > 0
+                # "Требует решения" — эта позиция попадает в preview-рекомендацию?
+                # rec_placement месяц (например, Авг) — пишем только текст, без цифр.
+                # rec_target месяц (например, Ноя, = дефицит) — показываем цифры.
+                rec_placement = bottleneck_by_placement_mi.get(mi)
+                rec_target = bottleneck_by_target_mi.get(mi)
+                is_placement_text = (
+                    rec_placement is not None
+                    and rec_placement["order_kg"].get(item["name"], 0) > 0
+                )
+                is_target_numbers = (
+                    rec_target is not None
+                    and rec_target["order_kg"].get(item["name"], 0) > 0
                 )
                 
                 # 1. Остаток позиции на начало (с цветом буфера)
@@ -493,10 +504,17 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                         c.font = Font(name='Arial', bold=False, size=9, color='000000')
                         c.fill = PatternFill(start_color='D5F5E3', end_color='D5F5E3', fill_type='solid')
                         c.alignment = Alignment(horizontal='center', vertical='center')
-                elif is_rec:
-                    # "Требует решения" - ФИОЛЕТОВЫЙ фон, это рекомендация, не заказ
-                    rec_kg = rec_this_month["order_kg"][item["name"]]
+                elif is_target_numbers:
+                    # "Требует решения" (месяц дефицита) - ФИОЛЕТОВЫЙ, с цифрами
+                    rec_kg = rec_target["order_kg"][item["name"]]
                     c.value = f"{int(rec_kg):,}\nтреб.реш.".replace(",", " ")
+                    c.number_format = '@'
+                    c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
+                    c.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
+                    c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                elif is_placement_text:
+                    # "Требует решения" (месяц, когда пора решать) - ФИОЛЕТОВЫЙ, только текст
+                    c.value = "Требует\nрешения"
                     c.number_format = '@'
                     c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
                     c.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
@@ -521,9 +539,9 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                     c.font = Font(name='Arial', bold=False, size=9, color='CCCCCC')
                     c.alignment = Alignment(horizontal='center', vertical='center')
                     c.fill = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
-                elif is_rec:
-                    # "Требует решения" - буфер ПОСЛЕ рекомендации, фиолетовый
-                    buf_after_rec = rec_this_month["buf_after"][item["name"]]
+                elif is_target_numbers:
+                    # "Требует решения" (месяц дефицита) - буфер ПОСЛЕ рекомендации, фиолетовый
+                    buf_after_rec = rec_target["buf_after"][item["name"]]
                     c.value = round(buf_after_rec, 1)
                     c.number_format = '0.0'
                     c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')

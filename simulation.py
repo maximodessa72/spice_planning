@@ -822,28 +822,31 @@ def get_bottleneck_recommendations(group: Dict, results: List[Dict]) -> List[Dic
         if not new_items:
             continue  # ситуация не изменилась с прошлого раза — не повторяем сигнал
 
-        # Считаем гипотетический заказ на балансах ТЕКУЩЕГО месяца j
-        ibs = r_j["bsi"]
+        # Считаем гипотетический заказ на балансах МЕСЯЦА ПРИХОДА (target_mi) —
+        # ровно так же, как в реальных заказах: opt_std в run_simulation
+        # балансирует по остаткам месяца, где происходит приход, а не
+        # месяца размещения заказа.
+        ibs_target = results[target_mi]["bsi"]
 
         if len(group["items"]) > 1:
             if is_g16:
-                order_kg = balance_g16(ckg, ibs, group["items"], j)
+                order_kg = balance_g16(ckg, ibs_target, group["items"], target_mi)
             elif has_seasonal and is_spent:
-                order_kg = opt_rb(ckg, ibs, group["items"], j)
+                order_kg = opt_rb(ckg, ibs_target, group["items"], target_mi)
             else:
-                order_kg = opt_std(ckg, ibs, group["items"])
+                order_kg = opt_std(ckg, ibs_target, group["items"])
         else:
             order_kg = {group["items"][0]["name"]: ckg}
 
         buf_after = {}
         for it in group["items"]:
-            pi = get_plan(it, j)
+            pi = get_plan(it, target_mi)
             arr = order_kg.get(it["name"], 0)
-            buf_after[it["name"]] = round((ibs[it["name"]] + arr) / pi, 2) if pi > 0 else 99
+            buf_after[it["name"]] = round((ibs_target[it["name"]] + arr) / pi, 2) if pi > 0 else 99
 
         recommendations.append({
-            "mi": j,
-            "target_mi": target_mi,
+            "mi": j,             # месяц показа текстовой метки "Требует решения"
+            "target_mi": target_mi,  # месяц, где показываем цифры (гипотетический приход)
             "critical_items": sorted(critical_items),
             "new_items": sorted(new_items),
             "order_kg": order_kg,

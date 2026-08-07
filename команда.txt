@@ -16,7 +16,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "авто обновление даты 3"
+git commit -m "заказы, которые требуют решения"
 git push
 
 [passwords]
