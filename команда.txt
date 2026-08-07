@@ -16,7 +16,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "заказы, которые требуют решения"
+git commit -m "заказы, которые требуют решения 3"
 git push
 
 [passwords]

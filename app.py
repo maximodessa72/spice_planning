@@ -2425,7 +2425,8 @@ elif page == "📅 Календарь заказов":
         with col1:
             st.metric("Групп для заказа", len(orders_df))
         with col2:
-            total_containers = orders_df["Контейнеров"].sum()
+            total_containers = pd.to_numeric(orders_df["Контейнеров"], errors="coerce").fillna(0).sum()
+            total_containers = int(total_containers)
             st.metric("Всего контейнеров", total_containers)
         with col3:
             # Считаем срочные заказы
