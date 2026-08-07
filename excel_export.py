@@ -505,13 +505,13 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                         c.fill = PatternFill(start_color='D5F5E3', end_color='D5F5E3', fill_type='solid')
                         c.alignment = Alignment(horizontal='center', vertical='center')
                 elif is_target_numbers:
-                    # "Требует решения" (месяц дефицита) - ФИОЛЕТОВЫЙ, с цифрами
+                    # "Требует решения" (месяц дефицита) - ФИОЛЕТОВЫЙ, только цифра
                     rec_kg = rec_target["order_kg"][item["name"]]
-                    c.value = f"{int(rec_kg):,}\nтреб.реш.".replace(",", " ")
-                    c.number_format = '@'
+                    c.value = int(rec_kg)
+                    c.number_format = '#,##0'
                     c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
                     c.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
-                    c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                    c.alignment = Alignment(horizontal='center', vertical='center')
                 elif is_placement_text:
                     # "Требует решения" (месяц, когда пора решать) - ФИОЛЕТОВЫЙ, только текст
                     c.value = "Требует\nрешения"
