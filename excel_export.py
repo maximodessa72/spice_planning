@@ -9,7 +9,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from typing import Dict, List
 from datetime import datetime
-from simulation import get_plan  # Для определения плана позиции в месяце
+from simulation import get_plan, get_bottleneck_recommendations  # get_plan — план позиции; get_bottleneck_recommendations — preview "Требует решения"
 from data import N_MONTHS, get_current_year_month  # get_current_year_month() — свежая дата при каждом вызове
 
 
@@ -185,6 +185,13 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
         group_name = group["name"]
         group_results = all_results[group_name]
         is_active = group.get("active", True)
+        
+        # "Требует решения" — preview-рекомендации (не влияют на расчёт, см. simulation.py)
+        # Список эскалаций за весь горизонт -> словарь {месяц показа: рекомендация}
+        bottleneck_recs_by_mi = {}
+        if is_active:
+            for rec in get_bottleneck_recommendations(group, group_results):
+                bottleneck_recs_by_mi[rec["mi"]] = rec
         
         # СТРОКА ГРУППЫ
         # Колонка A - название группы
@@ -422,6 +429,13 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
             for mi in range(N_MONTHS):
                 r = group_results[mi]
                 
+                # "Требует решения" — эта позиция в этом месяце попала в preview-рекомендацию?
+                rec_this_month = bottleneck_recs_by_mi.get(mi)
+                is_rec = (
+                    rec_this_month is not None
+                    and rec_this_month["order_kg"].get(item["name"], 0) > 0
+                )
+                
                 # 1. Остаток позиции на начало (с цветом буфера)
                 c = ws.cell(row=data_row, column=col)
                 c.value = int(r["bsi"][item["name"]])
@@ -479,6 +493,14 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                         c.font = Font(name='Arial', bold=False, size=9, color='000000')
                         c.fill = PatternFill(start_color='D5F5E3', end_color='D5F5E3', fill_type='solid')
                         c.alignment = Alignment(horizontal='center', vertical='center')
+                elif is_rec:
+                    # "Требует решения" - ФИОЛЕТОВЫЙ фон, это рекомендация, не заказ
+                    rec_kg = rec_this_month["order_kg"][item["name"]]
+                    c.value = f"{int(rec_kg):,}\nтреб.реш.".replace(",", " ")
+                    c.number_format = '@'
+                    c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
+                    c.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
+                    c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
                 else:
                     c.value = "—"
                     c.font = Font(name='Arial', bold=False, size=9, color='CCCCCC')
@@ -499,6 +521,14 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                     c.font = Font(name='Arial', bold=False, size=9, color='CCCCCC')
                     c.alignment = Alignment(horizontal='center', vertical='center')
                     c.fill = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
+                elif is_rec:
+                    # "Требует решения" - буфер ПОСЛЕ рекомендации, фиолетовый
+                    buf_after_rec = rec_this_month["buf_after"][item["name"]]
+                    c.value = round(buf_after_rec, 1)
+                    c.number_format = '0.0'
+                    c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
+                    c.alignment = Alignment(horizontal='center', vertical='center')
+                    c.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
                 else:
                     buf_val_after = r["ica"][item["name"]]  # Буфер ПОСЛЕ (НЕ округлённый)
                     c.value = round(buf_val_after, 1)  # Показываем округлённое
@@ -669,6 +699,21 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
         
         ws_calendar.row_dimensions[legend_row].height = 18
         legend_row += 1
+    
+    # "Требует решения" (preview-рекомендация, не заказ)
+    cell = ws_calendar.cell(row=legend_row, column=1)
+    cell.value = "Фиолетовый"
+    cell.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
+    cell.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    
+    cell = ws_calendar.cell(row=legend_row, column=2)
+    cell.value = "Требует решения — узкое место по отдельной позиции. Это рекомендация, не заказ."
+    cell.font = Font(name='Arial', bold=False, size=9)
+    cell.alignment = Alignment(horizontal='left', vertical='center')
+    
+    ws_calendar.row_dimensions[legend_row].height = 18
+    legend_row += 1
     
     # ========================================================================
     # ЗАКЛАДКА: КАЛЕНДАРЬ ПОСТАВОК

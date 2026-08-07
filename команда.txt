@@ -1,4 +1,4 @@
-https://spiceplanning.streamlit.app/
+cdhttps://spiceplanning.streamlit.app/
 https://share.streamlit.io/
 
 streamlit run app.py
@@ -16,7 +16,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "авто обновление даты 2"
+git commit -m "авто обновление даты 3"
 git push
 
 [passwords]

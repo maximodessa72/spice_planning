@@ -12,7 +12,8 @@ from simulation import (
     run_all_simulations, 
     get_summary_stats, 
     get_critical_groups,
-    get_plan
+    get_plan,
+    get_bottleneck_recommendations
 )
 
 # ========== АВТОСОХРАНЕНИЕ POSTGRESQL ==========
@@ -2371,6 +2372,30 @@ elif page == "📅 Календарь заказов":
                 "Срочность": urgency
             })
     
+    # ------------------------------------------------------------------
+    # "Требует решения" — отдельные позиции с низким буфером внутри группы,
+    # пока групповой (усреднённый) показатель этого не показывает.
+    # Это PREVIEW-рекомендация: ничего не сохраняется и не влияет на
+    # реальный расчёт/заказы. Показывается один раз, в первый критичный
+    # месяц группы; если решение по ней не приняли — дальше не напоминаем.
+    # ------------------------------------------------------------------
+    groups_already_listed = {o["Группа"] for o in orders_data}
+    for group in st.session_state.groups:
+        if not group.get("active", True):
+            continue
+        group_name = group["name"]
+        if group_name in groups_already_listed:
+            continue  # у группы и так есть реальный заказ в этом месяце
+        group_results = st.session_state.results[group_name]
+        recs = get_bottleneck_recommendations(group, group_results)
+        if any(rec["mi"] == selected_mi for rec in recs):
+            orders_data.append({
+                "Группа": group_name,
+                "Контейнеров": "—",
+                "Месяц прибытия": "—",
+                "Срочность": "🟣 Требует решения"
+            })
+    
     if orders_data:
         orders_df = pd.DataFrame(orders_data)
         
@@ -2380,13 +2405,19 @@ elif page == "📅 Календарь заказов":
             "🟠 Срочно": 1,
             "🟡 Есть время": 2,
             "🟢 Можно не торопиться": 3,
-            "📦 Уже заказан": 4
+            "🟣 Требует решения": 4,
+            "📦 Уже заказан": 5
         }
         orders_df["_sort"] = orders_df["Срочность"].map(urgency_order)
         orders_df = orders_df.sort_values("_sort").drop("_sort", axis=1).reset_index(drop=True)
         
         st.subheader(f"Заказы на {selected_month}")
         st.dataframe(orders_df, use_container_width=True, hide_index=True)
+        
+        if "🟣 Требует решения" in orders_df["Срочность"].values:
+            st.caption("🟣 Требует решения — в группе есть отдельная позиция с низким остатком, "
+                       "хотя усреднённый буфер группы в норме (маскируется избытком по другим позициям). "
+                       "Это рекомендация к рассмотрению — заказ не создаётся автоматически и не влияет на расчёты.")
         
         # Статистика
         st.divider()

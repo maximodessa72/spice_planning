@@ -737,3 +737,119 @@ def get_critical_groups(all_results: Dict[str, List[Dict]], threshold: float = 1
                 })
     
     return sorted(critical, key=lambda x: x["buffer"])
+
+
+def get_bottleneck_recommendations(group: Dict, results: List[Dict]) -> List[Dict]:
+    """
+    PREVIEW-функция "Требует решения" (узкое место внутри группы).
+
+    Групповой буфер считается как сумма остатков / сумма планов, поэтому
+    позиция с маленьким остатком может "прятаться" за позициями с большим
+    избытком — групповой сигнал не сработает, хотя конкретная позиция
+    вот-вот уйдёт в ноль.
+
+    Эта функция НИЧЕГО не меняет и не сохраняет (не пишет в in_transit/
+    auto_orders, не влияет на pending и на run_simulation) — preview-слой
+    поверх готовых results.
+
+    ЛОГИКА (месяц j = "сейчас", месяц j+cycle_m = когда пришёл бы заказ,
+    если разместить его в j — та же длительность цикла, что и у реальных
+    заказов):
+      - Смотрим на буфер позиций в месяце (j + cycle_m) — том, где был бы
+        приход, если заказать СЕЙЧАС.
+      - Если к этому моменту какая-то позиция ниже порога, и в промежутке
+        нет уже запланированного прихода, который бы это закрыл — считаем
+        гипотетический заказ на балансах месяца j (когда его реально
+        нужно было бы разместить).
+      - Рекомендация показывается заранее, в месяце j, а не постфактум.
+
+    ЭСКАЛАЦИЯ: если по группе уже показывали сигнал и его не приняли (не
+    заказали) — молчим, ПОКА список критичных позиций не изменится (не
+    появится хотя бы одна НОВАЯ критичная позиция). Если ситуация
+    ухудшилась — сигнал появляется снова. Если у группы случается реальный
+    приход (заказ сделан) — история сбрасывается, дальше считаем заново.
+
+    Returns:
+        Список словарей (может быть пустым), каждый — отдельная точка
+        эскалации:
+        {
+            "mi": месяц показа рекомендации (= месяц гипотетического заказа),
+            "target_mi": месяц, к которому относится дефицит (mi + cycle_m),
+            "critical_items": [все критичные позиции на этот момент],
+            "new_items": [позиции, которые стали критичными впервые],
+            "order_kg": {позиция: рекомендуемый приход, кг},
+            "buf_after": {позиция: буфер после рекомендации},
+        }
+    """
+    is_g4 = "часник" in group["name"].lower() or "чеснок" in group["name"].lower()
+    is_g16 = "кориц" in group["name"].lower() or "корица" in group["name"].lower()
+    is_spent = "Спент" in group["name"]
+    has_seasonal = any(it.get("seasonal") for it in group["items"])
+    buffer_threshold = BUFFER_GROUP4 if is_g4 else BUFFER_DEFAULT
+    ckg = group["container"]
+    cycle_m = math.ceil(group["cycle"] / 30)
+
+    recommendations = []
+    already_flagged_items = set()
+
+    for j in range(len(results)):
+        r_j = results[j]
+
+        # У группы в месяце j уже есть реальный приход (фикс./авто) —
+        # проблема так или иначе решается реальным заказом, сбрасываем историю
+        if r_j["in_transit"] or r_j.get("is_auto_order", False) or r_j["arrive"] > 0:
+            already_flagged_items = set()
+            continue
+
+        target_mi = j + cycle_m
+        if target_mi >= len(results):
+            break
+
+        # Есть ли уже запланированный приход между j и target_mi включительно?
+        has_future_arrival = any(
+            results[k]["arrive"] > 0 for k in range(j + 1, target_mi + 1)
+        )
+        if has_future_arrival:
+            continue
+
+        icb_target = results[target_mi]["icb"]  # буфер позиций к моменту дефицита
+        critical_items = {name for name, buf in icb_target.items() if buf < buffer_threshold}
+
+        if not critical_items:
+            continue
+
+        new_items = critical_items - already_flagged_items
+        if not new_items:
+            continue  # ситуация не изменилась с прошлого раза — не повторяем сигнал
+
+        # Считаем гипотетический заказ на балансах ТЕКУЩЕГО месяца j
+        ibs = r_j["bsi"]
+
+        if len(group["items"]) > 1:
+            if is_g16:
+                order_kg = balance_g16(ckg, ibs, group["items"], j)
+            elif has_seasonal and is_spent:
+                order_kg = opt_rb(ckg, ibs, group["items"], j)
+            else:
+                order_kg = opt_std(ckg, ibs, group["items"])
+        else:
+            order_kg = {group["items"][0]["name"]: ckg}
+
+        buf_after = {}
+        for it in group["items"]:
+            pi = get_plan(it, j)
+            arr = order_kg.get(it["name"], 0)
+            buf_after[it["name"]] = round((ibs[it["name"]] + arr) / pi, 2) if pi > 0 else 99
+
+        recommendations.append({
+            "mi": j,
+            "target_mi": target_mi,
+            "critical_items": sorted(critical_items),
+            "new_items": sorted(new_items),
+            "order_kg": order_kg,
+            "buf_after": buf_after,
+        })
+
+        already_flagged_items |= critical_items
+
+    return recommendations
