@@ -3181,6 +3181,15 @@ elif page == "✅ Фиксация даты прихода заказа":
                     current_date = datetime(current_year, current_month, auto_day)
                     is_fixed = False
                 
+                # Просрочен = дата зафиксирована, но приходится не на текущий месяц —
+                # значит заказ висит в in_transit ещё с прошлого месяца, его забыли
+                # подтвердить через "Подтверждение заказов". На этой странице такие
+                # заказы не показываем — здесь фиксируем даты только для того, что
+                # реально приходит в этом месяце.
+                is_overdue = is_fixed and (current_date.year != current_year or current_date.month != current_month)
+                if is_overdue:
+                    continue
+                
                 orders_current_month.append({
                     "group_name": group_name,
                     "containers": containers,
@@ -3264,11 +3273,20 @@ elif page == "✅ Фиксация даты прихода заказа":
         if isinstance(current_value, datetime):
             current_value = current_value.date()
         
+        _month_min = datetime(current_year, current_month, 1).date()
+        _month_max = datetime(current_year, current_month, 28).date()
+        
+        # Если дата (зафиксированная раньше) вне текущего месяца — это просроченный,
+        # так и не подтверждённый заказ из прошлого. st.date_input упадёт с ошибкой,
+        # если value вне [min_value, max_value], поэтому подставляем начало месяца.
+        if current_value < _month_min or current_value > _month_max:
+            current_value = _month_min
+        
         new_date = st.date_input(
             "Новая дата прихода:",
             value=current_value,
-            min_value=datetime(current_year, current_month, 1).date(),
-            max_value=datetime(current_year, current_month, 28).date(),
+            min_value=_month_min,
+            max_value=_month_max,
             key="new_arrival_date"
         )
     
