@@ -3175,9 +3175,12 @@ elif page == "✅ Фиксация даты прихода заказа":
                 else:
                     auto_day = 5  # По умолчанию
                 
-                # Проверяем есть ли зафиксированная дата
-                if group_name in st.session_state.arrival_fixed_dates:
-                    fixed_date = st.session_state.arrival_fixed_dates[group_name]
+                # Проверяем есть ли зафиксированная дата — но только если она относится
+                # к ТЕКУЩЕМУ месяцу. arrival_fixed_dates хранится по имени группы без
+                # привязки к месяцу, поэтому старая фиксация (например, ещё майская)
+                # не должна выдаваться за актуальную для августовского прихода.
+                fixed_date = st.session_state.arrival_fixed_dates.get(group_name)
+                if fixed_date is not None and fixed_date.year == current_year and fixed_date.month == current_month:
                     current_date = fixed_date
                     is_fixed = True
                 else:
