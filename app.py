@@ -3184,15 +3184,6 @@ elif page == "✅ Фиксация даты прихода заказа":
                     current_date = datetime(current_year, current_month, auto_day)
                     is_fixed = False
                 
-                # Просрочен = дата зафиксирована, но приходится не на текущий месяц —
-                # значит заказ висит в in_transit ещё с прошлого месяца, его забыли
-                # подтвердить через "Подтверждение заказов". На этой странице такие
-                # заказы не показываем — здесь фиксируем даты только для того, что
-                # реально приходит в этом месяце.
-                is_overdue = is_fixed and (current_date.year != current_year or current_date.month != current_month)
-                if is_overdue:
-                    continue
-                
                 orders_current_month.append({
                     "group_name": group_name,
                     "containers": containers,
