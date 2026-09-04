@@ -56,7 +56,8 @@ def save_state_to_db():
             "sales_plan_base": st.session_state.get("sales_plan_base", {}),
             "sales_prices": st.session_state.get("sales_prices", {}),
             "arrival_fixed_dates": {k: v.isoformat() if hasattr(v, 'isoformat') else str(v) 
-                                   for k, v in st.session_state.get("arrival_fixed_dates", {}).items()}
+                                   for k, v in st.session_state.get("arrival_fixed_dates", {}).items()},
+            "last_processed_month": st.session_state.get("last_processed_month")
         }
         
         # Upsert
@@ -179,22 +180,115 @@ if not check_password():
 
 # ========== КОНЕЦ АУТЕНТИФИКАЦИИ ==========
 
-# Функция очистки старых подтверждённых заказов
-def cleanup_old_confirmed_orders():
-    """Удаляет подтверждённые заказы из прошлых месяцев (до текущего стартового месяца)"""
-    from data import CURRENT_START_MONTH
-    
-    for group in GROUPS:
-        # Очищаем in_transit группы
-        old_keys = [mi for mi in group.get("in_transit", {}).keys() if mi < CURRENT_START_MONTH]
-        for mi in old_keys:
-            del group["in_transit"][mi]
-        
-        # Очищаем in_transit позиций
-        for item in group["items"]:
-            old_keys = [mi for mi in item.get("in_transit", {}).keys() if mi < CURRENT_START_MONTH]
-            for mi in old_keys:
-                del item["in_transit"][mi]
+# ========== СДВИГ ГОРИЗОНТА ПРИ СМЕНЕ МЕСЯЦА ==========
+#
+# mi=0 в данных группы/позиции означает "текущий календарный месяц" — но
+# сам расчёт "текущего месяца" берётся из реальной даты (datetime.now())
+# заново при каждом обращении, а вот данные (in_transit, week_arrival,
+# plan_override) хранятся под АБСОЛЮТНЫМИ (на момент ввода) значениями mi
+# и сами по себе НЕ сдвигаются. Из-за этого при смене календарного месяца
+# то, что было "приход в этом месяце" (mi=0), молча становится "приходом
+# в следующем месяце" — хотя физически ничего не менялось, просто mi=0
+# теперь указывает на другой календарный месяц.
+#
+# Чтобы это скомпенсировать, при обнаружении смены месяца нужно сдвинуть
+# ВСЕ mi-привязанные данные на -1 (или на -N, если пропущено несколько
+# месяцев подряд) — то есть уменьшить все ключи на N и выбросить то, что
+# стало отрицательным (тот же смысл, что и cleanup, только теперь с
+# реальным сдвигом остальных, а не просто удалением).
+
+def shift_relative_month_data(groups, n_months):
+    """
+    Сдвигает все mi-привязанные данные группы/позиций на n_months месяцев
+    назад — компенсируя то, что "текущий месяц" (mi=0) сам сдвинулся вперёд
+    в реальном календаре на n_months, а данные остались на старых индексах.
+
+    Затрагивает:
+      - group["in_transit"]   {mi: kg}   -> mi уменьшается на n_months,
+                                             отрицательные mi выбрасываются
+      - group["week_arrival"] {mi: week} -> так же
+      - item["in_transit"]    {mi: kg}   -> так же
+      - item["plan_override"]:
+          - для сезонных (список из 12, mi % 12) -> циклический сдвиг влево
+            на n_months (это повторяющийся годовой паттерн, а не разовое
+            расписание, поэтому не выбрасываем, а прокручиваем по кругу)
+          - для остальных (dict {mi: value}, разовое переопределение плана
+            на конкретные будущие месяцы) -> так же, как in_transit
+
+    Мутирует groups на месте, ничего не возвращает.
+    """
+    if n_months <= 0:
+        return
+
+    def _shift_dict(d):
+        return {mi - n_months: v for mi, v in d.items() if mi - n_months >= 0}
+
+    for group in groups:
+        if "in_transit" in group:
+            group["in_transit"] = _shift_dict(group["in_transit"])
+        if "week_arrival" in group:
+            group["week_arrival"] = _shift_dict(group["week_arrival"])
+
+        for item in group.get("items", []):
+            if "in_transit" in item:
+                item["in_transit"] = _shift_dict(item["in_transit"])
+
+            if "plan_override" in item:
+                po = item["plan_override"]
+                if item.get("seasonal"):
+                    # Сезонная позиция — plan_override это повторяющийся годовой
+                    # паттерн (get_plan берёт po[mi % 12]), а не разовое расписание.
+                    # Поэтому не выбрасываем месяцы, а прокручиваем по кругу.
+                    # Формат может быть списком (после round-trip через БД) или
+                    # словарём (на свежих, ни разу не сохранённых данных) — на
+                    # выходе всегда список из 12, как ожидает get_plan.
+                    k = n_months % 12
+                    if isinstance(po, list):
+                        item["plan_override"] = po[k:] + po[:k]
+                    elif isinstance(po, dict):
+                        item["plan_override"] = [po.get((i + k) % 12, po.get(str((i + k) % 12), 0))
+                                                  for i in range(12)]
+                elif isinstance(po, dict):
+                    # Не сезонная — разовое переопределение плана на конкретные
+                    # будущие месяцы, сдвигается так же, как in_transit.
+                    item["plan_override"] = _shift_dict(po)
+
+
+def apply_month_shift_if_needed():
+    """
+    Сравнивает реальный текущий месяц с меткой last_processed_month,
+    сохранённой в БД. Если реальный месяц продвинулся вперёд — сдвигает
+    все mi-привязанные данные (см. shift_relative_month_data) и обновляет
+    метку. Выполняется максимум один раз за календарный месяц, независимо
+    от того, кто и сколько раз в этом месяце заходил в приложение —
+    благодаря тому, что метка хранится в БД, а не в сессии.
+    """
+    from data import get_current_year_month
+    cur_year, cur_month = get_current_year_month()
+    current_key = f"{cur_year:04d}-{cur_month:02d}"
+
+    last_key = st.session_state.get("last_processed_month")
+
+    if last_key is None:
+        # Метки ещё никогда не было (самый первый запуск) — не с чем
+        # сравнивать, поэтому просто запоминаем текущий месяц как точку
+        # отсчёта, без сдвига (иначе рискуем случайно попортить свежие данные).
+        st.session_state.last_processed_month = current_key
+        save_state_to_db()
+        return
+
+    if last_key == current_key:
+        return  # уже обработано в этом месяце — ничего не делаем
+
+    last_year, last_month = (int(x) for x in last_key.split("-"))
+    months_diff = (cur_year - last_year) * 12 + (cur_month - last_month)
+
+    if months_diff > 0:
+        shift_relative_month_data(st.session_state.groups, months_diff)
+        st.session_state.results = None  # пересчитать симуляцию с чистого листа
+
+    st.session_state.last_processed_month = current_key
+    save_state_to_db()
 
 # Инициализация session state
 if 'groups' not in st.session_state:
@@ -264,9 +358,13 @@ if 'groups' not in st.session_state:
             st.session_state.arrival_fixed_dates = converted_dates
         else:
             st.session_state.arrival_fixed_dates = {}
+        
+        st.session_state.last_processed_month = loaded_state.get("last_processed_month")
     else:
-        cleanup_old_confirmed_orders()
         st.session_state.groups = GROUPS
+        st.session_state.last_processed_month = None
+    
+    apply_month_shift_if_needed()
 if 'sales_plan_base' not in st.session_state:
     st.session_state.sales_plan_base = {}
 if 'sales_prices' not in st.session_state:
