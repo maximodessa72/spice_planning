@@ -16,7 +16,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "старые заказы в подтверждении"
+git commit -m "исправление подтверждения заказов2"
 git push
 
 [passwords]
