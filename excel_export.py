@@ -539,8 +539,11 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                     c.font = Font(name='Arial', bold=False, size=9, color='CCCCCC')
                     c.alignment = Alignment(horizontal='center', vertical='center')
                     c.fill = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
-                elif is_target_numbers:
-                    # "Требует решения" (месяц дефицита) - буфер ПОСЛЕ рекомендации, фиолетовый
+                elif is_target_numbers and r["ia"][item["name"]] == 0:
+                    # "Требует решения" (месяц дефицита) - буфер ПОСЛЕ рекомендации, фиолетовый.
+                    # Проверяем именно r["ia"]==0 (нет реального прихода), чтобы не разойтись
+                    # с колонкой "Приход" — та тоже сначала проверяет реальный приход и только
+                    # потом рекомендацию.
                     buf_after_rec = rec_target["buf_after"][item["name"]]
                     c.value = round(buf_after_rec, 1)
                     c.number_format = '0.0'
