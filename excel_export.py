@@ -92,7 +92,8 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     bd_thick_right = Border(left=thin, right=thick, top=thin, bottom=thin)  # С толстой правой границей
     
     # Заголовок (строка 1)
-    ws.merge_cells('A1:AY1')  # Покрываем все колонки (3 + 12*4 = 51 = AY)
+    header_last_col = 3 + N_MONTHS * 4  # 3 фиксированные колонки + 4 колонки на каждый месяц
+    ws.merge_cells(f'A1:{get_column_letter(header_last_col)}1')
     cell = ws['A1']
     today = datetime.now().strftime("%d %B %Y").replace("January", "січня").replace("February", "лютого").replace("March", "березня").replace("April", "квітня").replace("May", "травня").replace("June", "червня").replace("July", "липня").replace("August", "серпня").replace("September", "вересня").replace("October", "жовтня").replace("November", "листопада").replace("December", "грудня")
     # Автоматический диапазон дат
@@ -577,9 +578,10 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     ws_calendar = wb.create_sheet("Календарь заказов")
     
     # Заголовок
-    ws_calendar.merge_cells('A1:N1')
+    calendar_header_last_col = get_column_letter(2 + N_MONTHS)  # A=группа, B..= месяцы, +1 запас как в оригинале
+    ws_calendar.merge_cells(f'A1:{calendar_header_last_col}1')
     cell = ws_calendar['A1']
-    cell.value = "Календарь заказов на 12 месяцев"
+    cell.value = f"Календарь заказов на {N_MONTHS} месяцев"
     cell.font = Font(name='Arial', bold=True, size=12, color='000000')
     cell.alignment = Alignment(horizontal='center', vertical='center')
     ws_calendar.row_dimensions[1].height = 25
@@ -743,7 +745,8 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
     ws_arrivals = wb.create_sheet("Календарь поставок")
     
     # Заголовок
-    ws_arrivals.merge_cells('A1:N1')
+    arrivals_header_last_col = get_column_letter(2 + N_MONTHS)
+    ws_arrivals.merge_cells(f'A1:{arrivals_header_last_col}1')
     cell = ws_arrivals['A1']
     cell.value = "Календарь поставок (приходы контейнеров)"
     cell.font = Font(name='Arial', bold=True, size=12, color='000000')

@@ -16,7 +16,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "исправление подтверждения заказов2"
+git commit -m "новый месяц"
 git push
 
 [passwords]

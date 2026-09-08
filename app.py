@@ -732,8 +732,8 @@ if page == "🏠 Главная":
     # Показываем текущий горизонт
     from data import CURRENT_START_MONTH
     start_label = get_month_label(0)
-    end_label = get_month_label(11)
-    st.caption(f"📅 Горизонт планирования: **{start_label} — {end_label}** (12 месяцев)")
+    end_label = get_month_label(N_MONTHS - 1)
+    st.caption(f"📅 Горизонт планирования: **{start_label} — {end_label}** ({N_MONTHS} месяцев)")
     
     if CURRENT_START_MONTH > 0:
         st.info(f"ℹ️ Система автоматически обновила горизонт планирования. Прошлые месяцы удалены, подтверждённые заказы из прошлого очищены.")
@@ -751,13 +751,13 @@ if page == "🏠 Главная":
         st.metric(
             "Контейнеров",
             format_number(stats["total_containers"]),
-            help="Общее количество заказов на 12 месяцев"
+            help=f"Общее количество заказов на {N_MONTHS} месяцев"
         )
     with col2:
         st.metric(
             "Общий объём",
             f"{format_number(stats['total_kg'])} кг",
-            help="Общий вес всех заказов на 12 месяцев"
+            help=f"Общий вес всех заказов на {N_MONTHS} месяцев"
         )
     with col3:
         st.metric(
@@ -1297,7 +1297,7 @@ elif page == "✅ Подтверждение заказов":
             group_results = results[group["name"]]
             group_orders = []
             
-            for mi in range(12):
+            for mi in range(N_MONTHS):
                 r = group_results[mi]
                 
                 if r["containers"] > 0:
@@ -2062,7 +2062,7 @@ elif page == "📈 Аналитика по закупкам":
     # ========================================================================
     # БЛОК 1: СТРУКТУРА ПОСТАВОК
     # ========================================================================
-    st.subheader("📊 Структура поставок (12 месяцев)")
+    st.subheader(f"📊 Структура поставок ({N_MONTHS} месяцев)")
     
     # Собираем данные по группам
     group_stats = []
@@ -2075,8 +2075,8 @@ elif page == "📈 Аналитика по закупкам":
             continue
         
         group_results = results[group["name"]]
-        total_containers = sum(r["containers"] for r in group_results[:12])
-        total_kg = sum(r["order_kg"] for r in group_results[:12])
+        total_containers = sum(r["containers"] for r in group_results[:N_MONTHS])
+        total_kg = sum(r["order_kg"] for r in group_results[:N_MONTHS])
         
         if total_kg > 0:  # Только если есть заказы
             group_stats.append({
@@ -2171,7 +2171,7 @@ elif page == "📈 Аналитика по закупкам":
     # Собираем данные по месяцам
     monthly_data = []
     
-    for mi in range(12):
+    for mi in range(N_MONTHS):
         month_label = get_month_label(mi)
         total_containers = 0
         total_kg = 0
@@ -2264,11 +2264,11 @@ elif page == "📈 Аналитика по закупкам":
         
         group_results = results[group["name"]]
         
-        # Ищем минимальный буфер за 12 месяцев
+        # Ищем минимальный буфер за весь горизонт планирования
         min_buffer = 99
         min_month = ""
         
-        for r in group_results[:12]:
+        for r in group_results[:N_MONTHS]:
             if r["w_buf_after"] < min_buffer:
                 min_buffer = r["w_buf_after"]
                 min_month = get_month_label(r["mi"])
@@ -2432,7 +2432,7 @@ elif page == "📅 Календарь заказов":
             return "🟢 Можно не торопиться"
     
     # ВЫБОР МЕСЯЦА
-    month_options = [get_month_label(i) for i in range(12)]  # Первые 12 месяцев
+    month_options = [get_month_label(i) for i in range(N_MONTHS)]  # Весь горизонт планирования
     selected_month = st.selectbox("Выберите месяц:", month_options)
     
     # Находим индекс выбранного месяца
@@ -2547,14 +2547,14 @@ elif page == "🚚 Календарь поставок":
         st.stop()
     
     # ВЫБОР ПЕРИОДА
-    period_options = ["За весь период"] + [get_month_label(i) for i in range(12)]
+    period_options = ["За весь период"] + [get_month_label(i) for i in range(N_MONTHS)]
     selected_period = st.selectbox("Выберите период:", period_options)
     
     st.divider()
     
     # Определяем какие месяцы показывать
     if selected_period == "За весь период":
-        months_to_show = list(range(12))
+        months_to_show = list(range(N_MONTHS))
         show_all = True
     else:
         selected_mi = period_options.index(selected_period) - 1  # -1 потому что первый элемент "За весь период"
