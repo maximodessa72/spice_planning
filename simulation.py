@@ -598,7 +598,7 @@ def run_simulation_with_auto_orders(group: Dict) -> List[Dict]:
     group_copy["in_transit"] = {k: v for k, v in group["in_transit"].items()}  # Фиксированные (не трогаем)
     group_copy["auto_orders"] = {}  # Автоматические (добавляем сюда)
     
-    max_iterations = 10
+    max_iterations = N_MONTHS + 2  # с запасом: в худшем случае - заказ почти на каждый месяц горизонта
     
     for iteration in range(max_iterations):
         # Запускаем симуляцию
@@ -688,7 +688,7 @@ def run_all_simulations(groups: List[Dict]) -> Dict[str, List[Dict]]:
                     "ica": {it["name"]: 99 for it in group["items"]},
                     "tpi": 0
                 }
-                for i in range(18)
+                for i in range(N_MONTHS)
             ]
         else:
             all_results[group["name"]] = run_simulation_with_auto_orders(group)
