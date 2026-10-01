@@ -16,7 +16,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "рекомендации"
+git commit -m "рекомендации 4"
 git push
 
 [passwords]
