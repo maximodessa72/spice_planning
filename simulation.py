@@ -812,13 +812,24 @@ def get_bottleneck_recommendations(group: Dict, results: List[Dict]) -> List[Dic
             already_flagged_items = set()
             continue
 
-        # Сканируем окно [j+1 .. j+cycle_m] в поисках первого реального
+        # Сканируем окно [j+cycle_m-1 .. j+cycle_m] в поисках первого реального
         # месяца дефицита — пропуская по пути только те месяцы, где уже
         # есть свой приход (их низкий буфер "до прихода" — норма).
+        #
+        # Почему не весь [j+1 .. j+cycle_m], а только последние два месяца
+        # этого диапазона: заказ, размещённый в j, физически не может
+        # приехать раньше чем примерно через cycle_m месяцев — это и есть
+        # цикл поставки. Более ранний месяц внутри диапазона (j+1 ... j+cycle_m-2)
+        # заказом ИЗ j не закрыть при всём желании, даже если там дефицит, —
+        # предлагать рекомендацию на него было бы физически невыполнимо.
+        # "-1" — запас на округление cycle_m = ceil(дни/30) вверх до целого
+        # месяца (например, 75 дней это 2.5 месяца, но cycle_m=3 — реальный
+        # приход попадёт в месяц j+2, а не j+3).
         target_mi = None
         critical_items = set()
+        window_start = max(j + 1, j + cycle_m - 1)
         window_end = min(j + cycle_m, len(results) - 1)
-        for cand in range(j + 1, window_end + 1):
+        for cand in range(window_start, window_end + 1):
             r_cand = results[cand]
             if r_cand["in_transit"] or r_cand.get("is_auto_order", False) or r_cand["arrive"] > 0:
                 continue  # у этого месяца уже есть приход — не он является дефицитом
