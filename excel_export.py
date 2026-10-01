@@ -513,14 +513,11 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                     c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
                     c.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
                     c.alignment = Alignment(horizontal='center', vertical='center')
-                elif is_placement_text:
-                    # "Требует решения" (месяц, когда пора решать) - ФИОЛЕТОВЫЙ, только текст
-                    c.value = "Требует\nрешения"
-                    c.number_format = '@'
-                    c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
-                    c.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
-                    c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
                 else:
+                    # Месяц размещения (is_placement_text) тут НИЧЕГО не пишем —
+                    # сигнал "пора решать" даём подсветкой колонки "Заказ → приход"
+                    # (ниже), а не заменой текста здесь, чтобы не перекрывать
+                    # реальные данные прихода.
                     c.value = "—"
                     c.font = Font(name='Arial', bold=False, size=9, color='CCCCCC')
                     # Нет прихода - голубой фон
@@ -555,12 +552,19 @@ def create_excel(all_results: Dict[str, List[Dict]], groups: List[Dict], filenam
                     buf_val_after = r["ica"][item["name"]]  # Буфер ПОСЛЕ (НЕ округлённый)
                     c.value = round(buf_val_after, 1)  # Показываем округлённое
                     c.number_format = '0.0'
-                    c.font = Font(name='Arial', bold=False, size=9, color='000000')
                     c.alignment = Alignment(horizontal='center', vertical='center')
-                    # Применяем цвет по НЕ округлённому значению
-                    c.fill = PatternFill(start_color=get_buffer_fill(buf_val_after), 
-                                        end_color=get_buffer_fill(buf_val_after), 
-                                        fill_type='solid')
+                    if is_placement_text:
+                        # Месяц размещения заказа ("Требует решения") — само
+                        # число буфера не трогаем, просто подсвечиваем ячейку
+                        # фиолетовым как сигнал "пора принимать решение".
+                        c.font = Font(name='Arial', bold=True, size=9, color='FFFFFF')
+                        c.fill = PatternFill(start_color='7B1FA2', end_color='7B1FA2', fill_type='solid')
+                    else:
+                        c.font = Font(name='Arial', bold=False, size=9, color='000000')
+                        # Применяем цвет по НЕ округлённому значению
+                        c.fill = PatternFill(start_color=get_buffer_fill(buf_val_after),
+                                            end_color=get_buffer_fill(buf_val_after),
+                                            fill_type='solid')
                 # Толстая правая граница для разделения месяцев + толстая нижняя для последней позиции
                 if is_last_item:
                     c.border = Border(left=thin, right=thick, top=thin, bottom=thick)
