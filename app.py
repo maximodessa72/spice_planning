@@ -221,7 +221,10 @@ def shift_relative_month_data(groups, n_months):
         return
 
     def _shift_dict(d):
-        return {mi - n_months: v for mi, v in d.items() if mi - n_months >= 0}
+        # Ключи могут прийти строками (JSON/JSONB round-trip через Supabase
+        # всегда превращает ключи словарей в строки) — приводим к int на
+        # всякий случай, даже если ожидается, что загрузчик уже это сделал.
+        return {int(mi) - n_months: v for mi, v in d.items() if int(mi) - n_months >= 0}
 
     for group in groups:
         if "in_transit" in group:
@@ -311,7 +314,14 @@ if 'groups' not in st.session_state:
                     po = item["plan_override"]
                     if isinstance(po, dict):
                         item["plan_override"] = [po[str(i)] if str(i) in po else po.get(i, 0) for i in range(12)]
-        
+                elif "plan_override" in item:
+                    # Не сезонная позиция — plan_override это {mi: value},
+                    # ключи после загрузки из Supabase приходят строками,
+                    # конвертируем в int так же, как in_transit.
+                    po = item["plan_override"]
+                    if isinstance(po, dict):
+                        item["plan_override"] = {int(k): v for k, v in po.items()}
+
         st.session_state.groups = groups
         
         # Sales данные
@@ -478,7 +488,12 @@ with st.sidebar:
                                         if isinstance(po, dict):
                                             # Конвертируем {0: val, 1: val, ...} в [val, val, ...]
                                             item["plan_override"] = [po[str(i)] if str(i) in po else po.get(i, 0) for i in range(12)]
-                            
+                                    elif "plan_override" in item:
+                                        # Не сезонная позиция — конвертируем ключи в int
+                                        po = item["plan_override"]
+                                        if isinstance(po, dict):
+                                            item["plan_override"] = {int(k): v for k, v in po.items()}
+
                             st.session_state.groups = groups
                             
                             # Конвертируем ключи в sales_plan_base {group_idx: {item_idx: {month_idx: value}}}

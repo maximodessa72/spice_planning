@@ -16,7 +16,7 @@ bash#
 # 3. Выполни команды:
 
 git add .
-git commit -m "18 месяцев"
+git commit -m "18 месяцев2"
 git push
 
 [passwords]
