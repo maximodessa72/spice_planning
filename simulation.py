@@ -638,16 +638,26 @@ def run_simulation_with_auto_orders(group: Dict) -> List[Dict]:
             # 2. Проверяем буфер на начало месяца
             buf_before = month_result["w_buf_before"]
             
-            # 3. Проверяем: есть ли уже приход в следующие cycle_m месяцев?
+            # 3. Проверяем: есть ли уже приход достаточно СКОРО, чтобы новый
+            #    заказ из месяца j был бы избыточен?
+            #    Новый заказ, размещённый в j, реально может доехать уже к
+            #    j + cycle_m - 1 (та же "-1" скидка на округление ceil(), что
+            #    и в min_auto_month выше). Поэтому уже запланированный приход
+            #    считаем "подстраховкой" только если он доезжает НЕ ПОЗЖЕ
+            #    этого срока. Если он позже (например, доезжает ровно через
+            #    cycle_m месяцев, как это и было у не-скорректированного
+            #    расчёта) — он НЕ отменяет необходимость нового, более
+            #    раннего заказа.
             has_future_arrival = False
-            for future_month in range(j + 1, min(j + cycle_m + 1, len(results))):
+            future_window_end = min(j + max(1, cycle_m - 1), len(results))
+            for future_month in range(j + 1, future_window_end):
                 if results[future_month]["arrive"] > 0:
                     has_future_arrival = True
                     break
-            
+
             # 4. Добавляем заказ только если:
             #    - Буфер низкий (< 1.0)
-            #    - И НЕТ прихода в ближайшие cycle_m месяцев
+            #    - И НЕТ прихода в ближайшие (скорректированные) cycle_m месяцев
             if buf_before < buffer_threshold and not has_future_arrival:
                 # Нужен приход в месяце j!
                 group_copy["auto_orders"][j] = ckg
